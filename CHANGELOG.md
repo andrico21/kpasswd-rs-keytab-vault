@@ -6,7 +6,7 @@ All notable changes to this crate are documented here. The format follows [Keep 
 
 - Nothing yet.
 
-## [0.2.0] - 2026-10-07
+## [0.2.0] - 2026-10-23
 
 ### Added
 
