@@ -1,0 +1,12 @@
+/target
+.omo/
+.codegraph/
+
+# cargo-mutants scratch: the campaign writes these next to the crate.
+/mutants.out*/
+
+# cargo-fuzz's own workspace, built into its directory.
+/fuzz/target
+
+# cargo-geiger's report (`scripts/ci-local.sh` writes it at the root).
+/geiger.txt

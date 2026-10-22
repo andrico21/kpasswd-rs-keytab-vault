@@ -1,0 +1,212 @@
+
+# cargo-vet audits file
+
+[[audits.aead]]
+criteria = "safe-to-deploy"
+version = "0.6.1"
+notes = "Credential-path crate (FEAT-5): the AEAD trait the envelope's payload and DEK-wrap ciphers implement."
+
+[[audits.aes]]
+criteria = "safe-to-deploy"
+version = "0.9.3"
+notes = "Credential-path crate (FIX-12 KRP-69): AES enctypes used by rskrb5's encryption of the KRB-PRIV payload."
+
+[[audits.argon2]]
+criteria = "safe-to-deploy"
+version = "0.6.0"
+notes = "Credential-path crate (FEAT-5): Argon2id for keytab-envelope passphrase slots only; a raw-key slot never instantiates it, which the injected-backend test and the source guard pin."
+
+[[audits.base64ct]]
+criteria = "safe-to-deploy"
+version = "1.8.3"
+notes = "Credential-path crate (FEAT-5): constant-time base64 used by argon2's PHC output path."
+
+[[audits.blake2]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FEAT-5): BLAKE2b, the hash inside argon2's KDF."
+
+[[audits.block-buffer]]
+criteria = "safe-to-deploy"
+version = "0.12.1"
+notes = "Credential-path crate: block buffering under the digest implementations."
+
+[[audits.chacha20poly1305]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FEAT-5): XChaCha20-Poly1305, the only envelope AEAD in v1 - the payload and every DEK wrap."
+
+[[audits.cipher]]
+criteria = "safe-to-deploy"
+version = "0.5.2"
+notes = "Credential-path crate: the block/stream cipher traits behind every enctype rskrb5 implements."
+
+[[audits.crypto-common]]
+criteria = "safe-to-deploy"
+version = "0.2.2"
+notes = "Credential-path crate: the shared trait/type crate under the RustCrypto digest and cipher crates."
+
+[[audits.des]]
+criteria = "safe-to-deploy"
+version = "0.9.0"
+notes = "Credential-path crate (FIX-12 KRP-69): DES enctype family (legacy decode path in rskrb5)."
+
+[[audits.digest]]
+criteria = "safe-to-deploy"
+version = "0.11.3"
+notes = "Credential-path crate: the hash traits used by the HMAC-based enctypes."
+
+[[audits.getrandom]]
+criteria = "safe-to-deploy"
+version = "0.2.17"
+notes = "Credential-path crate: OS CSPRNG, older transitive copy in the resolved graph."
+
+[[audits.getrandom]]
+criteria = "safe-to-deploy"
+version = "0.3.4"
+notes = "Credential-path crate: OS CSPRNG, reached transitively; the direct dependency uses 0.4."
+
+[[audits.getrandom]]
+criteria = "safe-to-deploy"
+version = "0.4.3"
+notes = "Credential-path crate (FIX-12 KRP-69): OS CSPRNG source for nonces and salt generation."
+
+[[audits.hickory-net]]
+criteria = "safe-to-deploy"
+version = "0.26.2"
+notes = "Credential-path crate: hickory's socket layer under that resolver."
+
+[[audits.hickory-proto]]
+criteria = "safe-to-deploy"
+version = "0.26.2"
+notes = "Credential-path crate: DNS message types for SRV discovery, the step that decides which host receives the credential-bearing exchange."
+
+[[audits.hickory-resolver]]
+criteria = "safe-to-deploy"
+version = "0.26.2"
+notes = "Credential-path crate: the resolver whose SRV/ANY lookups produce the KDC and kpasswd endpoints."
+
+[[audits.hmac]]
+criteria = "safe-to-deploy"
+version = "0.13.0"
+notes = "Credential-path crate: the HMAC construction at the core of aes256-cts-hmac-* string-to-key and checksum handling."
+
+[[audits.md-5]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FIX-12 KRP-69): RSA MD5 digest used by the RC4 enctype's string-to-key."
+
+[[audits.md4]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FIX-12 KRP-69): MD4 digest used by the RC4-HMAC string-to-key."
+
+[[audits.pbkdf2]]
+criteria = "safe-to-deploy"
+version = "0.13.0-rc.10"
+notes = """
+Pre-release acceptance (FIX-12, KRP-55): pbkdf2 0.13.0-rc.10 is pinned by
+rskrb5 0.2.0 and sits on the string-to-key path (AES-encrypted
+PA-ENC-TIMESTAMP derivation). Accepted as a documented risk: the rc has no
+known advisories and the API surface this crate exercises is the standard
+PBKDF2 construction. Closing condition: an rskrb5 release that unpins to a
+stable pbkdf2, at which point this audit entry is superseded by the
+upstream version's audit.
+"""
+
+[[audits.poly1305]]
+criteria = "safe-to-deploy"
+version = "0.9.1"
+notes = "Credential-path crate (FEAT-5): the envelope AEAD's authenticator, through chacha20poly1305."
+
+[[audits.rasn]]
+criteria = "safe-to-deploy"
+version = "0.28.14"
+notes = "Credential-path crate: ASN.1/DER encode and decode for every Kerberos message this tool sends or inspects."
+
+[[audits.rasn]]
+criteria = "safe-to-deploy"
+delta = "0.28.14 -> 0.28.15"
+notes = """
+The 0.28.14 -> 0.28.15 delta was read on 2026-09-29: the DER/BER-visible
+changes are the tagged-open-type constructed-bit fix (ber/enc.rs, X.690
+section 8.14.3) and stricter OID arc validation (types/oid.rs); the rest is
+the internal bit reader that replaces bitvec-nom2 and the PER rewrite
+(bits.rs, per/*), which the der/ber path does not reach. No dependency is
+added.
+"""
+
+[[audits.rasn-derive]]
+criteria = "safe-to-deploy"
+version = "0.28.14"
+notes = "Credential-path crate: the derive that generates rasn's codecs; compile-time only, but it produces the code that parses KDC bytes."
+
+[[audits.rasn-derive]]
+criteria = "safe-to-deploy"
+delta = "0.28.14 -> 0.28.15"
+notes = "The delta carries no source change (manifest version reference only)."
+
+[[audits.rasn-derive-impl]]
+criteria = "safe-to-deploy"
+version = "0.28.14"
+notes = "Credential-path crate: rasn-derive's proc-macro implementation."
+
+[[audits.rasn-derive-impl]]
+criteria = "safe-to-deploy"
+delta = "0.28.14 -> 0.28.15"
+notes = "The delta carries no source change (manifest version only)."
+
+[[audits.rasn-kerberos]]
+criteria = "safe-to-deploy"
+version = "0.28.14"
+notes = "Credential-path crate: the Kerberos message types (KDC-REQ/REP, KRB-ERROR, EncryptedData) decoded from KDC-controlled bytes."
+
+[[audits.rasn-kerberos]]
+criteria = "safe-to-deploy"
+delta = "0.28.14 -> 0.28.15"
+notes = "The delta carries no source change (manifest version only)."
+
+[[audits.rasn-pkix]]
+criteria = "safe-to-deploy"
+version = "0.28.14"
+notes = "Credential-path crate: PKIX types rasn-kerberos references; no certificate validation is performed by this tool."
+
+[[audits.rasn-pkix]]
+criteria = "safe-to-deploy"
+delta = "0.28.14 -> 0.28.15"
+notes = "The delta carries no source change (manifest version only)."
+
+[[audits.rc4]]
+criteria = "safe-to-deploy"
+version = "0.2.0"
+notes = "Credential-path crate (FIX-12 KRP-69): RC4-HMAC enctype family (legacy decode path in rskrb5)."
+
+[[audits.sha1]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FIX-12 KRP-69): SHA-1 HMAC used by the aes256-cts-hmac-sha1-96 enctype's checksum and key derivation."
+
+[[audits.sha2]]
+criteria = "safe-to-deploy"
+version = "0.11.0"
+notes = "Credential-path crate (FIX-12 KRP-69): SHA-384 HMAC used by the aes256-cts-hmac-sha384-192 enctype (this crate's preferred enctype, id 20)."
+
+[[audits.tokio]]
+criteria = "safe-to-deploy"
+version = "1.53.1"
+notes = "Credential-path crate: the async runtime that carries the exchanges; it owns the task memory in which derived keys and the plaintext keytab live."
+
+[[audits.universal-hash]]
+criteria = "safe-to-deploy"
+version = "0.6.1"
+notes = "Credential-path crate (FEAT-5): poly1305's hashing trait, through chacha20poly1305."
+
+[[audits.zeroize]]
+criteria = "safe-to-deploy"
+version = "1.9.0"
+notes = "Credential-path crate (FIX-12 KRP-69): zeroizes password-derived buffers on drop."
+
+[[audits.zeroize_derive]]
+criteria = "safe-to-deploy"
+version = "1.5.0"
+notes = "Credential-path crate: generates the Drop implementations that zero key material, including rskrb5's EncryptionKey."

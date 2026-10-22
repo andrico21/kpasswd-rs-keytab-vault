@@ -1,0 +1,21 @@
+# Deny rustc warnings at the CI boundary, not with `#![deny(warnings)]` in
+# source: the in-source form opts out of Rust's stability guarantees, because a
+# new compiler version's new warning becomes a build failure
+# (RUST_GUIDELINES.md section 7).
+#
+# This mechanism is preferred over `RUSTFLAGS="-D warnings"` because it does
+# not invalidate the build cache when it changes. Its scope is every *local*
+# package: the workspace members and the path dependencies under `vendor/`.
+# Only registry dependencies are exempt, because cargo caps their lints. A
+# warning in vendored upstream code therefore fails this build too. Rust 1.99
+# showed it: its `fetch_update` deprecation in `vendor/hickory-resolver`
+# stopped every test leg until patch 0010 (VENDORING.md).
+
+[build]
+warnings = "deny"
+
+# Scope, stated so it is not over-read: this gates rustc's `warnings` lint
+# group only. Lints that are allow-by-default - `unsafe_code`, `missing_docs`,
+# the whole `restriction` group, every `nursery` lint - are enabled in
+# `Cargo.toml` under `[lints]`, not here; and `linker_messages` sits outside
+# the `warnings` group by design, so it is denied explicitly there as well.

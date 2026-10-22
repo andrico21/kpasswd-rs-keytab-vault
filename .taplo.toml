@@ -1,0 +1,14 @@
+# taplo configuration (https://taplo.tamasfe.dev/configuration/file.html).
+# Scopes discovery to the repository's own TOML, so `taplo check` and
+# `taplo fmt --check` skip build output and local scratch. supply-chain/ is
+# cargo-vet's: it rewrites those files in its own style, and
+# `cargo vet --locked` (security job) already parses them.
+include = ["**/*.toml"]
+exclude = [
+  "target/**",
+  "fuzz/target/**",
+  ".git/**",
+  ".omo/**",
+  ".codegraph/**",
+  "supply-chain/**",
+]

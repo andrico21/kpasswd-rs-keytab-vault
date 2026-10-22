@@ -1,0 +1,373 @@
+name: CI
+
+# Single-crate repository (the vault split, S1). The jobs mirror the source
+# workspace's at the same strictness, with the monorepo-only legs dropped: no
+# `vendor/` (this crate's dependencies resolve from crates.io), no binary, no
+# workspace matrix. The local mirror is `scripts/ci-local.sh`; keep the two in
+# step. `release.yml` triggers on this workflow's completion, so CI must run
+# for a release to fire.
+on:
+  push:
+    branches: [main]
+    # Tag pushes must run CI: release.yml triggers on this workflow's
+    # completion and verifies a bare `X.Y.Z` tag (no prefix, no `v`, no
+    # suffix) points at the run's head SHA.
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, Monday 04:37 UTC: the advisory fuzz pass
+    # (`fuzz/fuzz_targets/envelope.rs`, the vault's format parser).
+    - cron: "37 4 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Without this the job inherits whatever rustc the runner image ships.
+      # rust-toolchain.toml then selects the compiler for every cargo call in
+      # the checkout; this input names the same channel, so the two cannot
+      # disagree (scripts/check-drift.sh, KRP-57).
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: 1.99.1
+
+      # The locked dependency graph on the runner before any gate reads it:
+      # `cargo deny check` resolves the graph through `cargo metadata`, and
+      # cargo-audit's yanked check reads the crates.io index cache this fills
+      # (`--no-fetch` below stops cargo-audit refreshing that cache itself).
+      - name: Fetch the locked dependency graph
+        run: cargo fetch --locked
+
+      # Pinned like every other input (KRP-57): an unpinned `cargo install`
+      # resolves whichever release is newest when the job runs, so a gate
+      # verdict could change with no change to this repository. The versions
+      # below are the ones the gates were last validated against; bump them
+      # deliberately, with a revalidation.
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked --version 0.19.6
+
+      # The advisory data is a mutable third-party feed on purpose: a pinned
+      # revision would go stale and silently miss advisories. It is therefore a
+      # *declared* input, not a hidden one - resolved exactly once here, in
+      # cargo-deny's own layout (`<db-path>/advisory-db-<hash>`, the only place
+      # `cargo deny check` reads), with the revision recorded for the run and
+      # the checkout handed to cargo-audit by path. Deleting it first is
+      # load-bearing: with a checkout already present, `cargo deny fetch db`
+      # reports success even when the fetch failed, so a stale copy would pass.
+      - name: Resolve the RustSec advisory database once
+        shell: bash
+        run: |
+          set -euo pipefail
+          # deny.toml: db-path = "~/.cargo/advisory-db". `cargo deny fetch db` clones each
+          # db-url into its own subdirectory there - the layout `cargo deny check` reads -
+          # and that one checkout is the snapshot both gates below are decided against.
+          ROOT="$HOME/.cargo/advisory-db"
+          rm -rf "$ROOT"
+          cargo deny fetch db
+          mapfile -t CHECKOUTS < <(find "$ROOT" -mindepth 1 -maxdepth 1 -type d -name 'advisory-db-*')
+          if [ "${#CHECKOUTS[@]}" -ne 1 ]; then
+            echo "::error::expected one cargo-deny advisory-db checkout under $ROOT, found ${#CHECKOUTS[@]}"
+            exit 1
+          fi
+          DB="${CHECKOUTS[0]}"
+          REVISION=$(git -C "$DB" rev-parse HEAD)
+          echo "RustSec advisory-db revision: $REVISION ($DB)"
+          echo "ADVISORY_DB=$DB" >> "$GITHUB_ENV"
+          {
+            echo "### RustSec advisory database"
+            echo ""
+            echo "- revision: \`$REVISION\`"
+            echo "- checkout: \`$DB\`, resolved once by \`cargo deny fetch db\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Advisory/ban/license/source policy is pinned in deny.toml; yanked
+      # crates are denied there explicitly (cargo-deny >= 0.18 semantics).
+      # `--disable-fetch` keeps the advisory check on the snapshot resolved
+      # above. Unlike `--offline`, it leaves `cargo metadata` and the yanked
+      # lookup online, which a fresh runner's empty cargo cache needs.
+      - name: Check advisories, licenses, bans & sources
+        run: cargo deny check --disable-fetch
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked --version 0.22.1
+
+      # `--deny yanked` because plain `cargo audit` reports a yanked crate as
+      # a warning and still exits 0; `--no-fetch --db` reads the snapshot
+      # resolved above.
+      - name: Audit RustSec advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit --no-fetch --db "$ADVISORY_DB" --deny yanked 2>&1 | tee "$RUNNER_TEMP/cargo-audit.log"
+          # --no-fetch also skips the crates.io index refresh; where the index cache is
+          # missing, cargo-audit prints this and still exits 0, which would pass the
+          # yanked gate without checking anything.
+          if grep -q "couldn't check if the package is yanked" "$RUNNER_TEMP/cargo-audit.log"; then
+            echo "::error::cargo-audit could not read the yanked status of every crate; refusing to pass the yanked gate unchecked"
+            exit 1
+          fi
+
+      - name: Install cargo-vet
+        run: cargo install cargo-vet --locked --version 0.10.2
+
+      # `--locked` reads supply-chain/imports.lock and performs no network I/O,
+      # so a registry outage cannot redden this gate. Scope, so it is not
+      # over-read: most locked crates are author exemptions, so this gate fails
+      # when the dependency graph moves; it is not evidence that a crate was
+      # independently audited.
+      - name: Check supply-chain audits
+        run: cargo vet --locked
+
+      - name: Install cargo-machete
+        run: cargo install cargo-machete --locked --version 0.9.2
+
+      - name: Check for unused dependencies
+        run: cargo machete
+
+      # Advisory, but version-pinned like the gating tools: the census below is
+      # this job's log (`geiger.txt` is gitignored), and it should change only
+      # when the dependency tree does, not when the tool does.
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked --version 0.13.0
+        continue-on-error: true
+
+      # `cargo geiger` exits non-zero when it *finds* `unsafe` in the tree -
+      # a finding count, not a failure - so its status is not a usable signal.
+      # Key off whether a census was actually produced instead.
+      - name: Census transitive `unsafe` usage
+        continue-on-error: true
+        run: |
+          cargo geiger > geiger.txt 2>&1 || true
+          tail -50 geiger.txt
+          if grep -qE '[0-9]+/[0-9]+[[:space:]]+[0-9]+/[0-9]+' geiger.txt; then
+            echo "cargo-geiger census produced."
+          else
+            echo "::warning::cargo-geiger produced no census - the tool failed to run, this is not an unsafe finding"
+          fi
+
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    # Promotes rustc warnings to errors for local packages only, without the
+    # cache-busting of RUSTFLAGS="-D warnings". The clippy step still needs its
+    # own -D warnings: this covers rustc lints, that covers clippy lints.
+    env:
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: 1.99.1
+          components: rustfmt, clippy
+
+      # KRP-57: every `uses:` ref must be a full 40-hex commit SHA. Matching the
+      # mutable spellings by name (`@v7`, `@master`) was a tripwire: `@v7.2.0`,
+      # `@release/v7` and `@v7 # note` all slipped past it. Anchoring on the SHA
+      # shape is the property itself - a trailing comment is fine, anything
+      # else is not - and scanning only YAML `uses:` keys keeps this step's own
+      # comment out of its own scan.
+      - name: Workflow lint (actions pinned to SHAs)
+        run: |
+          unpinned=$(grep -rEn '^[[:space:]]*(-[[:space:]]*)?uses:' .github/workflows/ \
+            | grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' || true)
+          if [ -n "$unpinned" ]; then
+            echo "::error::unpinned action refs found (every uses: ref must be a 40-hex commit SHA):"
+            echo "$unpinned"
+            exit 1
+          fi
+
+      - name: Pinned copies agree (scripts/check-drift.sh)
+        run: bash scripts/check-drift.sh
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # KRP-57: taplo checks TOML syntax (`taplo check`) and formatting
+      # (`taplo fmt --check`) for every file .taplo.toml includes;
+      # supply-chain/ is cargo-vet's and is parsed by `cargo vet --locked`.
+      # Version-pinned for the same reason as the security job's tool
+      # installs: it decides a gate verdict.
+      - name: Check TOML syntax and formatting
+        run: |
+          cargo install taplo-cli --locked --version 0.10.0
+          taplo check
+          taplo fmt --check
+
+      # The crate enables the strict profile via `[workspace.lints]` in
+      # Cargo.toml (the rust-guidelines rust-1.99-r3 section 9 table, copied
+      # unchanged); -D warnings promotes any residual warning.
+      - name: Clippy (deny warnings)
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      # The fuzz harness is its own workspace, so the step above never sees
+      # it; it carries the same lint profile (scripts/check-drift.sh).
+      - name: Clippy on the fuzz harness (deny warnings)
+        run: cargo clippy --locked --all-targets --manifest-path fuzz/Cargo.toml -- -D warnings
+
+      # `allow_attributes` sees only outer `#[allow]`; an inner `#![allow]`
+      # would pass it unseen, so the guidelines gate on this grep instead.
+      - name: No inner allow attributes
+        run: |
+          found=$(grep -rn --include='*.rs' '#!\[allow(' src tests || true)
+          if [ -n "$found" ]; then
+            echo "::error::inner #![allow] found; use #![expect(lint, reason = \"...\")]:"
+            echo "$found"
+            exit 1
+          fi
+
+      - name: Check rustc warnings (build.warnings=deny)
+        run: cargo check --locked --all-targets --keep-going
+
+  build-linux:
+    name: Build & Test (Linux)
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: 1.99.1
+
+      - name: Build
+        run: cargo build --locked --verbose
+
+      - name: Run tests
+        run: cargo test --locked --verbose
+
+      - name: Build the doc surface (rustdoc lints denied, warnings are errors)
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --locked --no-deps
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: 1.99.1
+          components: clippy
+
+      # Compile-only, as the source workspace's leg for this crate was: the
+      # crate must stay portable for the same reason `kpasswd-rs` must
+      # (KRP-78) - `argon2` and `chacha20poly1305` are built
+      # `default-features = false`, so this has to be a pure-Rust compile.
+      # The hardening flags are parsed here as they are for the binaries,
+      # though `cargo check` does not link, so the /link-args are
+      # syntax-checked only.
+      - name: Check the crate compiles for Windows
+        env:
+          RUSTFLAGS: "-C control-flow-guard=yes -C link-args=/DYNAMICBASE -C link-args=/HIGHENTROPYVA -C link-args=/NXCOMPAT -C link-args=/CETCOMPAT"
+        run: cargo check --locked --all-targets --verbose
+
+      # Clippy on the Windows target: code compiled only there - and items
+      # or imports left unused once the Linux-only tests drop out - is
+      # linted nowhere else. Same RUSTFLAGS as the check above, so the two
+      # share one build.
+      - name: Clippy for Windows (deny warnings)
+        env:
+          RUSTFLAGS: "-C control-flow-guard=yes -C link-args=/DYNAMICBASE -C link-args=/HIGHENTROPYVA -C link-args=/NXCOMPAT -C link-args=/CETCOMPAT"
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  msrv:
+    name: MSRV (1.99.0)
+    runs-on: ubuntu-latest
+    # Proves compile compatibility with `rust-version`, not lint cleanliness:
+    # lints are enforced on the pinned toolchain (the lint job).
+    # RUSTUP_TOOLCHAIN outranks rust-toolchain.toml; --cap-lints=warn and
+    # CARGO_BUILD_WARNINGS=allow keep the lint table's deny levels from
+    # failing a compile check. Same shape as ~/rmcp-server-kit's msrv job.
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.0"
+      RUSTFLAGS: "--cap-lints=warn"
+      CARGO_BUILD_WARNINGS: allow
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+      - run: rustc --version && cargo --version
+      - name: Build on the declared MSRV
+        run: cargo build --locked
+
+  fuzz:
+    name: cargo-fuzz (scheduled, advisory)
+    # Section 12 classes fuzzing informational. The target drives the crate's
+    # own parser of untrusted bytes (`fuzz/fuzz_targets/envelope.rs`): the
+    # format parser plus the pre-derivation Argon2 cost check - a hostile
+    # header must be refused before any KDF work. Schedule/dispatch only, and
+    # not mirrored by `scripts/ci-local.sh`, which runs no scheduled jobs.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      # One place to bump: the dated nightly this job's compiler and its
+      # `cargo +` selector both name. Pinned like every other input (KRP-57): a
+      # floating nightly silently changes what a run can find, and the corpus
+      # below is meant to accumulate across runs.
+      FUZZ_TOOLCHAIN: nightly-2026-10-01
+      # The harness now carries the crate's lint profile, enforced on the
+      # pinned toolchain by the lint job. This dated nightly may know a lint
+      # by another name or fire a newer one, and the advisory fuzz run must
+      # not stop on that: lints are capped to warnings (cargo-fuzz appends
+      # its own flags to RUSTFLAGS) and warnings do not fail the build.
+      RUSTFLAGS: "--cap-lints=warn"
+      CARGO_BUILD_WARNINGS: allow
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+      # The harness's own lockfile is tracked (fuzz/Cargo.lock). cargo-fuzz has
+      # no --locked flag, so this step is the lock: a stale lockfile fails here
+      # instead of the fuzz build silently re-resolving the harness's inputs.
+      - name: Check the fuzz lockfile is current
+        run: cargo +${{ env.FUZZ_TOOLCHAIN }} metadata --locked --format-version 1 --manifest-path fuzz/Cargo.toml > /dev/null
+      # The corpus is the job's memory: without a restore it re-learns the same
+      # shapes every run. Keyed on the inputs it is a seed for, so a changed
+      # parser gets a fresh cache line while the previous one still seeds it.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            fuzz/corpus
+            fuzz/artifacts
+          key: fuzz-corpus-${{ hashFiles('fuzz/fuzz_targets/**', 'src/**', 'Cargo.lock') }}
+          restore-keys: |
+            fuzz-corpus-
+      - name: Fuzz the envelope parser (bounded smoke run)
+        working-directory: fuzz
+        run: |
+          echo "::group::fuzz envelope"
+          # The per-input timeout is the property: a hostile header cannot buy
+          # work, so an input that blocks is libFuzzer's own finding rather than
+          # the run's wall clock cutting the run short.
+          cargo +${{ env.FUZZ_TOOLCHAIN }} fuzz run envelope -- -max_total_time=1800 -timeout=60 -rss_limit_mb=4096
+          echo "::endgroup::"
+      - name: Upload corpus
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: fuzz-corpus
+          path: |
+            fuzz/corpus
+            fuzz/artifacts
+          if-no-files-found: ignore
+          retention-days: 14

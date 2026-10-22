@@ -1,0 +1,3 @@
+edition = "2024"
+max_width = 100
+# imports_granularity / group_imports are nightly-only rustfmt options; not set.

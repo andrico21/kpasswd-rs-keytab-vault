@@ -1,0 +1,174 @@
+name: Release
+
+# Publishes `kpasswd-rs-keytab-vault` to crates.io only when (a) a bare
+# `X.Y.Z` tag (no crate prefix, no `v`) exists on a commit AND (b) the CI
+# workflow on that exact commit completed successfully. Triggered off
+# `workflow_run: [CI]` (not `push: tags`) so a red CI blocks the publish; the
+# tag lookup below rejects every non-release run.
+#
+# The ritual (the source workspace's docs/release-procedure.md):
+#   1. the release commit lands on `main` - CHANGELOG entry dated,
+#      `publish = false` lifted
+#   2. CI runs on the push and must be green
+#   3. the tag is pushed at the same SHA; CI runs again on the tag ref
+#   4. when that run completes successfully this workflow finds the tag,
+#      verifies version and publish flag, dry-runs, publishes, and opens the
+#      GitHub release; the post-release commit restores `publish = false`
+#
+# Ordering: `kpasswd-rs` must be on crates.io before this crate's manifest
+# resolves (its dependency is registry-only), and the repository needs the
+# `CARGO_REGISTRY_TOKEN` secret for the upload step.
+#
+# The main-push and tag-push CI runs share one SHA, so both pass the tag
+# lookup and `cargo publish` can be attempted twice. The publish step is
+# therefore idempotent: "already exists on crates.io index" exits success and
+# records published=false, and the GitHub release is gated on published=true -
+# a run that did not upload the bytes never certifies them.
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  publish:
+    name: cargo publish
+    # Provenance gate (before any checkout): a succeeded CI run whose head
+    # repository is THIS repo, triggered by push or a manual dispatch. Both
+    # are non-fork-triggerable; pull_request and schedule runs never publish.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      (github.event.workflow_run.event == 'push' ||
+       github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The exact commit CI ran against, tags included for the lookup below.
+      # This job reads local git metadata only; no push credential is
+      # persisted into the untrusted-head_sha checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The compiler rust-toolchain.toml pins - the one CI gated this commit
+      # with - not a moving channel: the published bytes and the tested bytes
+      # must come from the same input. This input names the same channel.
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: 1.99.1
+
+      - name: Find the crate tag pointing at this commit
+        id: find-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          # This repository has exactly one crate, so a release tag is the bare
+          # version X.Y.Z and nothing else: no prefix, no `v`, no suffix.
+          TAGS=$(git tag --points-at "$SHA" \
+                | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          COUNT=$(printf '%s\n' "$TAGS" | grep -c '[^[:space:]]' || true)
+          if [ "$COUNT" -gt 1 ]; then
+            printf '::error::multiple release tags point at %s; refusing to guess:\n%s\n' "$SHA" "$TAGS"
+            exit 1
+          fi
+          TAG="$TAGS"
+          if [ -z "$TAG" ]; then
+            echo "::notice::No crate tag points at $SHA - this run is not a release invocation. Skipping publish."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          VERSION="$TAG"
+          echo "Found tag: $TAG (version $VERSION)"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "crate=kpasswd-rs-keytab-vault" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify crate version and publish flag
+        if: steps.find-tag.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          META=$(cargo metadata --no-deps --format-version 1)
+          META_VERSION=$(echo "$META" | jq -r '.packages[0].version')
+          META_PUBLISH=$(echo "$META" | jq -r '.packages[0].publish')
+          if [ "$META_VERSION" != "${{ steps.find-tag.outputs.version }}" ]; then
+            echo "::error::tag ${{ steps.find-tag.outputs.tag }} does not match the manifest version $META_VERSION"
+            exit 1
+          fi
+          # cargo metadata reports `publish = false` as an empty registry list.
+          if [ "$META_PUBLISH" = "[]" ]; then
+            echo "::error::the crate still has publish = false; the release commit must lift it (release procedure, step 4)"
+            exit 1
+          fi
+          echo "${{ steps.find-tag.outputs.crate }} $META_VERSION is publishable."
+
+      - name: Extract release notes for this version
+        if: steps.find-tag.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.find-tag.outputs.version }}"
+          NOTES_PATH="${RUNNER_TEMP}/RELEASE_NOTES.md"
+          # The procedure mandates the changelog entry in the release commit,
+          # so a missing section is a hard error rather than a fallback.
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { found=1; next }
+            found && /^## \[/        { exit }
+            found                    { print }
+          ' CHANGELOG.md > "$NOTES_PATH"
+          if [ ! -s "$NOTES_PATH" ]; then
+            echo "::error::No section for [$VERSION] in CHANGELOG.md"
+            exit 1
+          fi
+          echo "NOTES_PATH=${NOTES_PATH}" >> "$GITHUB_ENV"
+
+      - name: Dry-run publish
+        if: steps.find-tag.outputs.skip != 'true'
+        run: cargo publish --locked --dry-run
+
+      - name: Publish to crates.io
+        id: publish
+        if: steps.find-tag.outputs.skip != 'true'
+        # The token is scoped to this step, but the step still builds the package
+        # with it in the environment. crates.io trusted publishing (OIDC,
+        # `id-token: write`, no secret) removes that once the trusted publisher
+        # is configured on the crates.io side; until then this is the documented
+        # resting point.
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        shell: bash
+        run: |
+          set -uo pipefail
+          TAG="${{ steps.find-tag.outputs.tag }}"
+          OUTPUT=$(cargo publish --locked 2>&1) && STATUS=0 || STATUS=$?
+          echo "$OUTPUT"
+          if [ "$STATUS" -eq 0 ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Published kpasswd-rs-keytab-vault@$TAG to crates.io."
+            exit 0
+          fi
+          if echo "$OUTPUT" | grep -qiF "already exists on crates.io index"; then
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::kpasswd-rs-keytab-vault@$TAG was already on crates.io before this run; this pipeline did not upload these bytes and will not create a release for them. If this is not the expected duplicate trigger for the same SHA, the version was published out of band - verify the uploaded artifact."
+            exit 0
+          fi
+          echo "::error::cargo publish failed (exit $STATUS)."
+          exit "$STATUS"
+
+      - name: Create GitHub release
+        if: steps.find-tag.outputs.skip != 'true' && steps.publish.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.find-tag.outputs.tag }}" \
+            --title "${{ steps.find-tag.outputs.tag }}" \
+            --notes-file "${NOTES_PATH}" \
+            --verify-tag

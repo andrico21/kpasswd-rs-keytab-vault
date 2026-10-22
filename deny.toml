@@ -1,0 +1,65 @@
+# The universal guidelines' deny.toml (core section 10, rust-guidelines tag
+# rust-1.99-r3), in the sample's order. This crate's deltas are the license
+# allowlist, `private`, and the `[bans] skip` list, each with its reason.
+# Adapted from the source workspace's file when the vault split out (S1); the
+# entries it carried for `ring`/`hickory`/`vendor` do not apply here - this
+# crate's tree is registry-only.
+
+[graph]
+# No optional dependencies in this crate (it has no features), so this is a
+# no-op kept for parity with the source workspace's file.
+all-features = true
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Scope, not a lint level: transitive dependencies are where most RUSTSEC
+# exposure lives.
+unmaintained = "all"
+unsound = "all"
+# Vulnerability denial is unconditional in cargo-deny >= 0.18 (the
+# `vulnerability` key was removed; "deny" is the only behavior), so no key
+# is stated here. Yanked crates are denied explicitly.
+yanked = "deny"
+
+[licenses]
+confidence-threshold = 0.93
+# Crates without a license field are ignored only when they are unpublished;
+# this crate itself declares `MIT OR Apache-2.0`.
+private = { ignore = true }
+# Only licenses a dependency actually needs. An `A OR B` expression is
+# satisfied by either side, so licenses that appear only as the other side of
+# an OR with MIT are not listed.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "Unicode-3.0",
+  "Zlib",
+]
+
+[bans]
+# KRP-56: multiple versions are denied. Each `skip` entry is an older version a
+# dependency still requires, with the chain that forces it; only an upstream
+# release can retire one. clippy.toml `allowed-duplicate-crates` mirrors this
+# list (core section 9).
+multiple-versions = "deny"
+wildcards = "deny"
+allow-wildcard-paths = false
+highlight = "all"
+skip = [
+  # rskrb5-patched (the published fork) requires `getrandom = "0.3"`; 0.4 is
+  # this crate's own.
+  { name = "getrandom", version = "0.3.4" },
+  # r-efi 5 sits under getrandom 0.3, r-efi 6 under getrandom 0.4 (UEFI only).
+  { name = "r-efi", version = "5.3.0" },
+  # syn 2 under rasn-derive/snafu-derive/zeroize_derive, 3 under
+  # async-trait and displaydoc.
+  { name = "syn", version = "3.0.6" },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# This repository is registry-only; no git sources are allowed at all.
+allow-git = []
