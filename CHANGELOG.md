@@ -6,6 +6,12 @@ All notable changes to this crate are documented here. The format follows [Keep 
 
 - Nothing yet.
 
+## [0.2.2] - 2026-10-23
+
+### Changed
+
+- Internal only: the repository now holds itself to the strictest union of its own lint gates and `rmcp-server-kit`'s. Rustfmt's import layout is checked on a dated nightly, rustdoc is built the way docs.rs builds it, and new gates keep the lint profile equal to the guideline it cites, refuse `allow` attributes, require catalogued `expect` reasons, and require every test to be documented and to return `Result`. The source changes are import layout, test code and lint-reason wording; the API, the behavior and the envelope format are unchanged.
+
 ## [0.2.1] - 2026-10-23
 
 ### Changed

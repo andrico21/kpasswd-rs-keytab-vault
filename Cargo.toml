@@ -1,6 +1,6 @@
 [package]
 name = "kpasswd-rs-keytab-vault"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.99"
 description = "Encrypted keytabs at rest: XChaCha20-Poly1305 envelopes with Argon2id passphrases, slots and rotation"
@@ -16,8 +16,7 @@ exclude = ["docs/fix-plans/", "docs/rust-guidelines/", "scripts/lint-ratchet/"]
 # Restored by the post-release commit (release procedure step 8): the default
 # state can never publish by accident; the release commit lifts this, the next
 # one puts it back. `publish = false` also keeps `clippy::cargo_common_metadata`
-# quiet for pre-release builds.
-publish = false
+# quiet for pre-release builds. This is the release commit's state.
 readme = "README.md"
 
 [dependencies]
