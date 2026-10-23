@@ -1,0 +1,33 @@
+# Ported from rmcp-server-kit scripts/lint-ratchet/profile-deltas.toml at
+# b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
+# Local deltas: adds the `[[clippy-only-duplicate]]` table.
+# Toolchain-driven deltas between the vendored core Section 9 profile and
+# Cargo.toml (D-14 iii).  Empty at the start; entries are added only by the
+# toolchain-drift procedure, each with the toolchain version that requires it.
+#
+# [[rename]]
+# from = "clippy::old_lint"
+# to = "clippy::new_lint"
+# toolchain = "1.100"
+#
+# [[removed]]
+# lint = "clippy::gone_lint"
+# toolchain = "1.100"
+#
+# [[level]]
+# lint = "clippy::some_lint"
+# level = "warn"
+# toolchain = "1.100"
+#
+# ``profile_eq.py`` reads this file to compare Cargo.toml against the vendored
+# profile modulo these recorded deltas. (The retired ``measure.py``/count gate
+# also consulted ``from``/``lint`` names; nothing does now.)
+
+# Crates clippy's multiple_crate_versions reports but cargo-deny never
+# encounters: they sit in clippy.toml allowed-duplicate-crates and must not sit
+# in deny.toml [bans] skip (cargo-deny would warn unmatched-skip).
+# profile_eq.py --clippy-toml exempts exactly these names from the mirror check
+# and fails when an entry goes stale.
+[[clippy-only-duplicate]]
+name = "windows-sys"
+reason = "0.52.0 via ring (lockfile-resident, outside cargo-deny's resolved graph) and 0.61.2 via tokio, mio and ipconfig; clippy's multiple_crate_versions fails without the clippy.toml entry"

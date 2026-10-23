@@ -1,8 +1,10 @@
 # Lint *configuration*; lint *levels* live in `Cargo.toml` under `[lints]`. Neither
-# file can express the other. Copied from the universal Rust guidelines
-# (RUST_GUIDELINES.md section 9, tag rust-1.99-r3); this project's own entries are the
-# `allowed-duplicate-crates` items, each with its reason. `doc-valid-idents` keeps
-# Clippy's defaults (`..`); append a proper noun there rather than backticking it.
+# file can express the other. Copied from the universal Rust guidelines (section 9
+# of docs/rust-guidelines/RUST_GUIDELINES.md, vendored at tag rust-1.99-r3);
+# scripts/lint-ratchet/profile_eq.py --clippy-toml holds it equal to that sample.
+# This project's own entries are the `allowed-duplicate-crates` items, each with
+# its reason. `doc-valid-idents` keeps Clippy's defaults (`..`); append a proper
+# noun there rather than backticking it.
 avoid-breaking-exported-api = false       # report even when the fix changes public API
 check-private-items = true                # missing_*_doc lints cover private items too
 allow-unwrap-in-tests = false             # tests follow the same panic rules
@@ -18,9 +20,9 @@ too-many-lines-threshold = 100            # drives `too_many_lines`
 max-fn-params-bools = 3                   # drives `fn_params_excessive_bools`
 enum-variant-size-threshold = 200         # drives `large_enum_variant`
 # The duplicates list mirrors deny.toml's [bans] skip, which carries the reasons;
-# windows-sys is clippy-only here (cargo-deny's graph view did not flag it). Each
-# entry is an older major that a dependency still pins, and only an upstream
-# release can retire it.
+# windows-sys is clippy-only here (cargo-deny's graph view did not flag it), recorded in
+# scripts/lint-ratchet/profile-deltas.toml. Each entry is an older major that a
+# dependency still pins, and only an upstream release can retire it.
 allowed-duplicate-crates = [
   "getrandom", # 0.3 via rskrb5-patched, 0.4 direct
   "r-efi",     # 5 and 6, under getrandom 0.3 and 0.4
