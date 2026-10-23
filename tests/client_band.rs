@@ -13,14 +13,19 @@
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     extern crate alloc;
 
     use alloc::sync::Arc;
-    use core::sync::atomic::{AtomicUsize, Ordering};
+    use core::{
+        error::Error,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
 
     use kpasswd_rs::{
         AdminIdentity, Client, EntryPoint, KeytabUnlocker, NotAttempted, Outcome, Principal,
@@ -30,6 +35,9 @@ mod tests {
         Argon2idParams, EnvelopeUnlocker, Kdf, Recipient, SlotCredential, SlotSelector, seal,
     };
     use zeroize::Zeroizing;
+
+    /// What every test here returns: a failure is an `Err` the harness reports.
+    type TestResult = Result<(), Box<dyn Error>>;
 
     /// A minimal keytab: the two-byte header with no entries. It is a *real*
     /// keytab `rskrb5` parses, so the post-unlock path runs to its end.
@@ -113,24 +121,27 @@ mod tests {
     /// the refusal reaches the caller as the pre-exchange
     /// `NeverAttempted(NotAttempted::Local(..))` - before any request exists.
     #[tokio::test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    async fn the_unlockers_band_bounds_what_the_client_will_open() {
+    async fn the_unlockers_band_bounds_what_the_client_will_open() -> TestResult {
         let unlocker = EnvelopeUnlocker::new(
             out_of_band_envelope(),
             SlotSelector::Label("operator"),
             SlotCredential::Passphrase(PASSPHRASE),
         )
-        .unwrap_or_else(|error| panic!("a sealed envelope must be accepted: {error}"));
+        .map_err(|error| format!("a sealed envelope must be accepted: {error}"))?;
         let identity = AdminIdentity::from_locked_keytab(principal(), Box::new(unlocker));
         let client = client_for(identity, false);
         let outcome = client.set_password(&principal(), b"new-password").await;
         let Outcome::NeverAttempted(NotAttempted::Local(detail)) = outcome else {
-            panic!("an out-of-band envelope is the pre-exchange refusal: {outcome:?}");
+            return Err(format!(
+                "an out-of-band envelope is the pre-exchange refusal: {outcome:?}"
+            )
+            .into());
         };
         assert!(
             detail.contains("under its own policy"),
             "the refusal is the unlocker's policy classification: {detail}"
         );
+        Ok(())
     }
 
     /// An exchange unlocks exactly once, and the lock does not survive it.
@@ -139,7 +150,7 @@ mod tests {
     /// for an administrator setting someone else's password, never two for one
     /// exchange - even though both go through `set_password`.
     #[tokio::test]
-    async fn an_exchange_unlocks_exactly_once() {
+    async fn an_exchange_unlocks_exactly_once() -> TestResult {
         let calls = Arc::new(AtomicUsize::new(0));
         let unlocker = CountingUnlocker::new(Arc::clone(&calls), EMPTY_KEYTAB.to_vec());
         let identity = AdminIdentity::from_locked_keytab(principal(), Box::new(unlocker));
@@ -156,6 +167,7 @@ mod tests {
             2,
             "a second exchange asks the unlocker once more, not twice"
         );
+        Ok(())
     }
 
     /// An exchange refused before the pre-flight never calls the unlocker.
@@ -167,8 +179,7 @@ mod tests {
     /// proves the deferral on the side that does: the locked client built here
     /// is only held, and its unlocker was never asked.
     #[tokio::test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    async fn a_refused_armor_never_unlocks() {
+    async fn a_refused_armor_never_unlocks() -> TestResult {
         let calls = Arc::new(AtomicUsize::new(0));
         let unlocker = CountingUnlocker::new(Arc::clone(&calls), EMPTY_KEYTAB.to_vec());
         // A locked identity whose unlocker a running exchange would consult; it
@@ -180,9 +191,10 @@ mod tests {
         let refused = client_for(AdminIdentity::from_password(principal(), b"secret"), true);
         let outcome = refused.set_password(&principal(), b"new-password").await;
         let Outcome::NeverAttempted(NotAttempted::Local(detail)) = outcome else {
-            panic!(
+            return Err(format!(
                 "a required armour refuses the password exchange before any request: {outcome:?}"
-            );
+            )
+            .into());
         };
         assert!(
             detail.contains("--require-armor"),
@@ -193,5 +205,6 @@ mod tests {
             0,
             "a refused exchange, and a locked client that was only built, both leave every unlocker untouched"
         );
+        Ok(())
     }
 }
