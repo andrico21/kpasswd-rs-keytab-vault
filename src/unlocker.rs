@@ -317,9 +317,11 @@ const fn classify(error: EnvelopeError) -> UnlockError {
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     use kpasswd_rs::{KeytabUnlocker, UnlockError};
 
@@ -331,8 +333,8 @@ mod tests {
         kdf::{Argon2idParams, Kdf},
         seal::seal,
         test_support::{
-            OTHER_KEY, PASSPHRASE, PLAINTEXT, PanickingKdf, RAW_KEY, passphrase_recipient,
-            raw_recipient_with,
+            OTHER_KEY, PASSPHRASE, PLAINTEXT, PanickingKdf, RAW_KEY, TestResult,
+            passphrase_recipient, raw_recipient_with,
         },
     };
 
@@ -342,7 +344,11 @@ mod tests {
     /// A plaintext keytab is a bearer secret, so the deferred state must refuse
     /// it on the magic rather than store it (r12/D2).
     #[test]
-    fn envelope_unlocker_refuses_a_plaintext_keytab() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::envelope_unlocker_refuses_a_plaintext_keytab keeps the uniform test signature while it only asserts"
+    )]
+    fn envelope_unlocker_refuses_a_plaintext_keytab() -> TestResult {
         let outcome = EnvelopeUnlocker::new(
             b"a keytab stands here".to_vec(),
             OPERATOR,
@@ -352,6 +358,7 @@ mod tests {
             matches!(outcome, Err(EnvelopeError::Malformed(Malformed::Magic))),
             "non-envelope bytes must be refused before anything is stored"
         );
+        Ok(())
     }
 
     /// The gate and the parser agree on the magic.
@@ -361,14 +368,13 @@ mod tests {
     /// for: a dependency magic change must fail here rather than silently split
     /// the two doors.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn the_dependency_magic_agrees_with_this_crates_magic() {
+    fn the_dependency_magic_agrees_with_this_crates_magic() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient_with(1, "operator", &RAW_KEY)],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             is_envelope(&blob),
             "the dependency's gate must accept what this crate writes"
@@ -385,21 +391,18 @@ mod tests {
             !is_envelope(b"a keytab stands here"),
             "and neither door accepts a plaintext keytab"
         );
+        Ok(())
     }
 
     /// The refusal path must wipe too: the buffer is wrapped in `Zeroizing`
     /// **before** the magic test, so a refused plaintext keytab is wiped on the
     /// way out exactly as the accepted buffer is.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "a missing constructor means the guard is about code that no longer exists"
-    )]
-    fn the_admission_gate_wipes_the_buffer_it_refuses() {
+    fn the_admission_gate_wipes_the_buffer_it_refuses() -> TestResult {
         let source = crate::production_text(include_str!("unlocker.rs"));
         let start = source
             .find("pub fn new(")
-            .unwrap_or_else(|| panic!("`EnvelopeUnlocker::new` must still exist"));
+            .ok_or("`EnvelopeUnlocker::new` must still exist")?;
         let body = source.get(start..).unwrap_or_default();
         let end = body.find("\n    }").unwrap_or(body.len());
         let window = body.get(..end).unwrap_or_default();
@@ -423,6 +426,7 @@ mod tests {
                 "`new` must not copy the bytes it may refuse (found `{copy}`)"
             );
         }
+        Ok(())
     }
 
     /// The behavioural half of the guard above: the bytes `new` refuses are
@@ -433,7 +437,11 @@ mod tests {
     /// writes its free-list bookkeeping there.
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     #[test]
-    fn the_refused_buffer_is_wiped_before_it_is_freed() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::the_refused_buffer_is_wiped_before_it_is_freed keeps the uniform test signature while it only asserts"
+    )]
+    fn the_refused_buffer_is_wiped_before_it_is_freed() -> TestResult {
         use crate::test_support::FreedMemory;
 
         /// Bytes in the refused buffer: small enough for the allocator's
@@ -470,70 +478,70 @@ mod tests {
             control, WATCHED,
             "the instrument must see an unwiped freed block; it saw {control} of {WATCHED} bytes"
         );
+        Ok(())
     }
 
     /// A raw-key slot opens through the trait object a client holds, and the
     /// plaintext comes back byte-for-byte.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn a_raw_key_unlock_round_trips_through_the_trait() {
+    fn a_raw_key_unlock_round_trips_through_the_trait() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient_with(1, "operator", &RAW_KEY)],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let unlocker = EnvelopeUnlocker::new(blob, OPERATOR, SlotCredential::RawKey(&RAW_KEY))
-            .unwrap_or_else(|error| panic!("a sealed envelope must be accepted: {error}"));
+            .map_err(|error| format!("a sealed envelope must be accepted: {error}"))?;
         let trait_object: &dyn KeytabUnlocker = &unlocker;
         let plaintext = trait_object
             .unlock()
-            .unwrap_or_else(|error| panic!("the fixture must open: {error}"));
+            .map_err(|error| format!("the fixture must open: {error}"))?;
         assert_eq!(
             plaintext.as_slice(),
             PLAINTEXT,
             "the payload comes back exactly as it was sealed"
         );
+        Ok(())
     }
 
     /// The wrong raw key fails the wrap's tag, and that is the authentication
     /// classification - not a parse failure and not a policy refusal.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn a_wrong_credential_is_not_authenticated() {
+    fn a_wrong_credential_is_not_authenticated() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient_with(1, "operator", &RAW_KEY)],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let unlocker = EnvelopeUnlocker::new(blob, OPERATOR, SlotCredential::RawKey(&OTHER_KEY))
-            .unwrap_or_else(|error| panic!("a sealed envelope must be accepted: {error}"));
+            .map_err(|error| format!("a sealed envelope must be accepted: {error}"))?;
         assert!(
             matches!(unlocker.unlock(), Err(UnlockError::NotAuthenticated)),
             "a key that does not open the slot must be NotAuthenticated"
         );
+        Ok(())
     }
 
     /// A slot whose declared Argon2 parameters fall outside the band is refused
     /// by policy, and the backend that panics if reached proves the refusal
     /// precedes every derivation.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn an_out_of_band_argon2_block_is_refused_by_policy() {
+    fn an_out_of_band_argon2_block_is_refused_by_policy() -> TestResult {
         // 16 MiB, t=1, p=1: at or above the crate's floor, and far below the
         // 64 MiB the default band admits, so only the band can refuse it.
         let params = Argon2idParams::new(0x4000, 1, 1)
-            .unwrap_or_else(|error| panic!("the fixture parameters must be admissible: {error}"));
+            .map_err(|error| format!("the fixture parameters must be admissible: {error}"))?;
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::Argon2id(params),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let unlocker =
             EnvelopeUnlocker::new(blob, OPERATOR, SlotCredential::Passphrase(PASSPHRASE))
-                .unwrap_or_else(|error| panic!("a sealed envelope must be accepted: {error}"));
+                .map_err(|error| format!("a sealed envelope must be accepted: {error}"))?;
         assert!(
             matches!(
                 unlocker.unlocked(&PanickingKdf),
@@ -541,6 +549,7 @@ mod tests {
             ),
             "a block outside the default band is refused before the backend is reached"
         );
+        Ok(())
     }
 
     /// Every [`EnvelopeError`] becomes exactly the [`UnlockError`] SOW §4.6
@@ -554,7 +563,11 @@ mod tests {
         clippy::match_same_arms,
         reason = "SOW §4.6 lists RotationMismatch as its own row: it is unreachable on the unlock path and classified as Malformed deliberately, so it keeps its own arm to name that decision"
     )]
-    fn every_envelope_error_maps_to_a_classification() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::every_envelope_error_maps_to_a_classification keeps the uniform test signature while it only asserts"
+    )]
+    fn every_envelope_error_maps_to_a_classification() -> TestResult {
         let errors = [
             EnvelopeError::AuthenticationFailed,
             EnvelopeError::Malformed(Malformed::Argon2Parameters),
@@ -609,12 +622,17 @@ mod tests {
                 "the classification of {error} must match SOW §4.6"
             );
         }
+        Ok(())
     }
 
     /// Every secret-bearing field the unlocker owns is a `Zeroizing` buffer, so
     /// the ciphertext and the credential die with it.
     #[test]
-    fn owned_unlocker_secrets_are_zeroizing() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::owned_unlocker_secrets_are_zeroizing keeps the uniform test signature while it only asserts"
+    )]
+    fn owned_unlocker_secrets_are_zeroizing() -> TestResult {
         let source = crate::production_text(include_str!("unlocker.rs"));
         for declaration in [
             "bytes: Zeroizing<Vec<u8>>,",
@@ -636,6 +654,7 @@ mod tests {
                 "the selector holds no secret, so {selector} is expected"
             );
         }
+        Ok(())
     }
 
     /// The §4.3 no-cache guard: exactly three fields, and no interior mutability
@@ -650,7 +669,11 @@ mod tests {
     /// the count, a `RefCell` in the declaration fails the scan, and a
     /// `thread_local!` anywhere in the production half fails it too.
     #[test]
-    fn unlocker_fields_hold_ciphertext_and_credential_only() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::unlocker_fields_hold_ciphertext_and_credential_only keeps the uniform test signature while it only asserts"
+    )]
+    fn unlocker_fields_hold_ciphertext_and_credential_only() -> TestResult {
         let source = crate::production_text(include_str!("unlocker.rs"));
         let declaration = struct_declaration(&source, "pub struct EnvelopeUnlocker {");
         let fields: Vec<&str> = declaration
@@ -691,12 +714,17 @@ mod tests {
                 "the production half must name no {forbidden}: a cache the guard cannot see is how the no-cache property would be lost"
             );
         }
+        Ok(())
     }
 
     /// The trait object a client boxes must cross a `tokio::spawn` boundary, so
     /// the implementation is `Send + Sync`.
     #[test]
-    fn the_unlocker_is_send_and_sync() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/unlocker.rs::the_unlocker_is_send_and_sync keeps the uniform test signature while it only asserts"
+    )]
+    fn the_unlocker_is_send_and_sync() -> TestResult {
         /// Fails to compile if `T` is not both `Send` and `Sync`.
         const fn assert_send_and_sync<T>()
         where
@@ -704,6 +732,7 @@ mod tests {
         {
         }
         assert_send_and_sync::<EnvelopeUnlocker>();
+        Ok(())
     }
 
     /// The body of the declaration that starts with `header`, from the line
