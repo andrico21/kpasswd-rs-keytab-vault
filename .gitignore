@@ -10,3 +10,7 @@
 
 # cargo-geiger's report (`scripts/ci-local.sh` writes it at the root).
 /geiger.txt
+
+# Python bytecode from the lint-ratchet gates (scripts/lint-ratchet/).
+__pycache__/
+*.pyc

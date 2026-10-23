@@ -8,9 +8,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/andrico21/kpasswd-rs-keytab-vault"
 keywords = ["keytab", "kerberos", "encryption", "argon2"]
 categories = ["authentication", "cryptography"]
-# Repository documents (the working plans under docs/) are not crate content;
-# release procedure step 5 reviews `cargo package --list` against this.
-exclude = ["docs/fix-plans/"]
+# Repository documents (the working plans under docs/fix-plans/ and the
+# vendored guideline under docs/rust-guidelines/) and the lint-ratchet gate
+# scripts are not crate content; release procedure step 5 reviews
+# `cargo package --list` against this.
+exclude = ["docs/fix-plans/", "docs/rust-guidelines/", "scripts/lint-ratchet/"]
 # Restored by the post-release commit (release procedure step 8): the default
 # state can never publish by accident; the release commit lifts this, the next
 # one puts it back. `publish = false` also keeps `clippy::cargo_common_metadata`
@@ -47,9 +49,12 @@ workspace = true
 resolver = "3"
 
 # Lint profile: the rust-guidelines rust-1.99-r3 section 9 table, copied
-# unchanged; exceptions stay per-item `#[expect]` in the source, and an
-# excluded lint is opted into per item with `#[deny]` (src/lib.rs:
-# `big_endian_bytes`), as the guideline's exclusions section allows.
+# unchanged from the core guideline vendored byte-for-byte at
+# docs/rust-guidelines/RUST_GUIDELINES.md (tag rust-1.99-r3, commit 1314cadf;
+# docs/rust-guidelines/SHA256SUMS pins its bytes). CI holds the two equal with
+# scripts/lint-ratchet/profile_eq.py. Exceptions stay per-item `#[expect]` in
+# the source, and an excluded lint is opted into per item with `#[deny]`
+# (src/lib.rs: `big_endian_bytes`), as the guideline's exclusions section allows.
 
 [workspace.lints.rust]
 # Every rustc lint group, at deny (individual entries below override at priority 0)
