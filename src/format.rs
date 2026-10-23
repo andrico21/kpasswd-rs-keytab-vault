@@ -565,8 +565,7 @@ pub(crate) fn parse_slot(
 )]
 mod tests {
     use super::*;
-    use crate::test_support::*;
-    use crate::*;
+    use crate::{test_support::*, *};
 
     /// A file that is not an envelope at all is rejected on the magic.
     #[test]

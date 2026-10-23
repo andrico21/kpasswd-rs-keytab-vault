@@ -8,18 +8,21 @@
 use chacha20poly1305::aead::{Aead, Payload};
 use zeroize::Zeroizing;
 
-use crate::credential::{Recipient, SlotCredential, SlotSelector};
-use crate::envelope::{
-    KeytabEnvelope, cipher_from_key, nonce_from_bytes, wrap_aad_for, wrap_dek, wrap_identity,
+use crate::{
+    credential::{Recipient, SlotCredential, SlotSelector},
+    envelope::{
+        KeytabEnvelope, cipher_from_key, nonce_from_bytes, wrap_aad_for, wrap_dek, wrap_identity,
+    },
+    format::{
+        ARGON2_OUTPUT_LEN, ARGON2_VERSION, DEK_LEN, EnvelopeError, FILE_ID_LEN, FIXED_HEADER_LEN,
+        FORMAT_VERSION, KDF_BLOCK_LEN, KDF_SALT_END, KDF_SALT_START, KEK_LEN, MAGIC,
+        MAX_PAYLOAD_LEN, MAX_SLOT_LABEL_LEN, MAX_SLOTS, MIN_SLOTS, Malformed, NONCE_LEN,
+        PAYLOAD_ALG_XCHACHA20_POLY1305, PAYLOAD_NONCE_OFFSET, SALT_LEN, SLOT_TYPE_PASSPHRASE,
+        SLOT_TYPE_RAW_KEY, SlotType, TAG_LEN, WRAP_AAD_MIN_LEN, WRAP_ALG_XCHACHA20_POLY1305,
+        WRAPPED_DEK_LEN, is_unrenderable_in_a_label,
+    },
+    kdf::{Argon2Kdf, Argon2idParams, Kdf, KdfBackend as _, KdfLimits},
 };
-use crate::format::{
-    ARGON2_OUTPUT_LEN, ARGON2_VERSION, DEK_LEN, EnvelopeError, FILE_ID_LEN, FIXED_HEADER_LEN,
-    FORMAT_VERSION, KDF_BLOCK_LEN, KDF_SALT_END, KDF_SALT_START, KEK_LEN, MAGIC, MAX_PAYLOAD_LEN,
-    MAX_SLOT_LABEL_LEN, MAX_SLOTS, MIN_SLOTS, Malformed, NONCE_LEN, PAYLOAD_ALG_XCHACHA20_POLY1305,
-    PAYLOAD_NONCE_OFFSET, SALT_LEN, SLOT_TYPE_PASSPHRASE, SLOT_TYPE_RAW_KEY, SlotType, TAG_LEN,
-    WRAP_AAD_MIN_LEN, WRAP_ALG_XCHACHA20_POLY1305, WRAPPED_DEK_LEN, is_unrenderable_in_a_label,
-};
-use crate::kdf::{Argon2Kdf, Argon2idParams, Kdf, KdfBackend as _, KdfLimits};
 
 /// Everything a writer must draw from the CSPRNG, injectable so a test can
 /// pin the exact bytes of a file.
@@ -596,10 +599,7 @@ fn header_len_for(prefixes: &[Vec<u8>]) -> Result<usize, EnvelopeError> {
 )]
 pub(crate) mod tests {
     use super::*;
-    use crate::format::KEK_ALG_DIRECT_256;
-    use crate::kdf::salt_from_block;
-    use crate::test_support::*;
-    use crate::*;
+    use crate::{format::KEK_ALG_DIRECT_256, kdf::salt_from_block, test_support::*, *};
 
     /// How many rotations the nonce-reuse tests perform after the seal. Five is
     /// the row's number, and a named bound keeps the loop's integer type a

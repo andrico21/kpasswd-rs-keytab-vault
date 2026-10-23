@@ -1,3 +1,12 @@
 edition = "2024"
 max_width = 100
-# imports_granularity / group_imports are nightly-only rustfmt options; not set.
+# Import layout from the core guideline (docs/rust-guidelines/RUST_GUIDELINES.md,
+# "Configure rustfmt.toml for import organization"). Both options are
+# nightly-only: stable rustfmt warns and ignores them, so the nightly-lint CI
+# job checks them with `cargo +nightly-2026-10-03 fmt`, and stable
+# `cargo fmt --check` still passes on the result.
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+# Enforce LF instead of preserving whatever a file has, so a CRLF file fails
+# `cargo fmt --check` rather than drifting silently.
+newline_style = "Unix"

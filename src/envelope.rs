@@ -12,18 +12,22 @@
 
 use core::fmt;
 
-use chacha20poly1305::aead::{Aead, Payload};
-use chacha20poly1305::{KeyInit, XChaCha20Poly1305};
+use chacha20poly1305::{
+    KeyInit, XChaCha20Poly1305,
+    aead::{Aead, Payload},
+};
 use zeroize::Zeroizing;
 
-use crate::credential::{SlotCredential, SlotSelector};
-use crate::format::{
-    Cursor, DEK_LEN, EnvelopeError, FILE_ID_LEN, FIXED_HEADER_LEN, FORMAT_VERSION, KDF_BLOCK_LEN,
-    KEK_LEN, MAGIC, MAX_HEADER_LEN, MAX_PAYLOAD_LEN, MAX_SLOTS, MIN_SLOTS, Malformed, NONCE_LEN,
-    PAYLOAD_ALG_XCHACHA20_POLY1305, Slot, SlotInfo, SlotType, TAG_LEN, WRAP_AAD_MIN_LEN,
-    WRAPPED_DEK_LEN, parse_slot,
+use crate::{
+    credential::{SlotCredential, SlotSelector},
+    format::{
+        Cursor, DEK_LEN, EnvelopeError, FILE_ID_LEN, FIXED_HEADER_LEN, FORMAT_VERSION,
+        KDF_BLOCK_LEN, KEK_LEN, MAGIC, MAX_HEADER_LEN, MAX_PAYLOAD_LEN, MAX_SLOTS, MIN_SLOTS,
+        Malformed, NONCE_LEN, PAYLOAD_ALG_XCHACHA20_POLY1305, Slot, SlotInfo, SlotType, TAG_LEN,
+        WRAP_AAD_MIN_LEN, WRAPPED_DEK_LEN, parse_slot,
+    },
+    kdf::{KdfBackend, KdfLimits, decode_argon2_block},
 };
-use crate::kdf::{KdfBackend, KdfLimits, decode_argon2_block};
 
 /// A parsed envelope, ready to select a slot from.
 #[non_exhaustive]
@@ -568,10 +572,11 @@ impl fmt::Debug for Selection<'_> {
 )]
 mod tests {
     use super::*;
-    use crate::seal::seal_with;
-    use crate::seal::tests::deterministic_material;
-    use crate::test_support::*;
-    use crate::*;
+    use crate::{
+        seal::{seal_with, tests::deterministic_material},
+        test_support::*,
+        *,
+    };
 
     /// The pinned bytes of [`golden_passphrase_vector_matches`]: slot 9,
     /// label `operator`, sealed with [`PASSPHRASE`].

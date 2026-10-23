@@ -355,17 +355,20 @@ mod production_text_tests {
     reason = "test code is not rendered API documentation"
 )]
 mod test_support {
-    use zeroize::Zeroizing;
-
-    use crate::credential::{Recipient, SlotCredential, SlotSelector};
-    use crate::envelope::KeytabEnvelope;
-    use crate::format::{EnvelopeError, KDF_BLOCK_LEN, KEK_LEN};
-    use crate::kdf::{Argon2Kdf, Kdf, KdfBackend, KdfLimits};
-    use crate::seal::seal;
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     use std::fs::File;
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     use std::os::unix::fs::FileExt as _;
+
+    use zeroize::Zeroizing;
+
+    use crate::{
+        credential::{Recipient, SlotCredential, SlotSelector},
+        envelope::KeytabEnvelope,
+        format::{EnvelopeError, KDF_BLOCK_LEN, KEK_LEN},
+        kdf::{Argon2Kdf, Kdf, KdfBackend, KdfLimits},
+        seal::seal,
+    };
 
     /// Reads what a freed heap block still holds, through this process's own
     /// `/proc/self/mem`: reading freed memory directly would take `unsafe`,

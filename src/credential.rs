@@ -4,8 +4,7 @@
 //! Every variant that carries a secret has a manual `Debug` that names the
 //! shape and never the bytes, because a derived one would put a KEK or a
 //! passphrase into any log line that formats the caller's input.
-use core::fmt;
-use core::str::from_utf8;
+use core::{fmt, str::from_utf8};
 
 use zeroize::Zeroizing;
 

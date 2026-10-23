@@ -19,14 +19,15 @@
 
 use core::fmt;
 
+use kpasswd_rs::{KeytabUnlocker, UnlockError, is_envelope};
 use zeroize::Zeroizing;
 
-use kpasswd_rs::{KeytabUnlocker, UnlockError, is_envelope};
-
-use crate::credential::{SlotCredential, SlotSelector};
-use crate::envelope::KeytabEnvelope;
-use crate::format::{EnvelopeError, KEK_LEN, Malformed};
-use crate::kdf::{Argon2Kdf, KdfBackend, KdfLimits};
+use crate::{
+    credential::{SlotCredential, SlotSelector},
+    envelope::KeytabEnvelope,
+    format::{EnvelopeError, KEK_LEN, Malformed},
+    kdf::{Argon2Kdf, KdfBackend, KdfLimits},
+};
 
 /// The owned form of [`SlotSelector`].
 ///
@@ -320,17 +321,20 @@ const fn classify(error: EnvelopeError) -> UnlockError {
     reason = "test code is not rendered API documentation"
 )]
 mod tests {
-    use super::{EnvelopeUnlocker, classify, is_envelope};
-    use crate::credential::{SlotCredential, SlotSelector};
-    use crate::envelope::KeytabEnvelope;
-    use crate::format::{EnvelopeError, MAGIC, Malformed};
-    use crate::kdf::{Argon2idParams, Kdf};
-    use crate::seal::seal;
-    use crate::test_support::{
-        OTHER_KEY, PASSPHRASE, PLAINTEXT, PanickingKdf, RAW_KEY, passphrase_recipient,
-        raw_recipient_with,
-    };
     use kpasswd_rs::{KeytabUnlocker, UnlockError};
+
+    use super::{EnvelopeUnlocker, classify, is_envelope};
+    use crate::{
+        credential::{SlotCredential, SlotSelector},
+        envelope::KeytabEnvelope,
+        format::{EnvelopeError, MAGIC, Malformed},
+        kdf::{Argon2idParams, Kdf},
+        seal::seal,
+        test_support::{
+            OTHER_KEY, PASSPHRASE, PLAINTEXT, PanickingKdf, RAW_KEY, passphrase_recipient,
+            raw_recipient_with,
+        },
+    };
 
     /// A selector for the single-slot fixtures below.
     const OPERATOR: SlotSelector<'_> = SlotSelector::Label("operator");

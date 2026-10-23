@@ -359,9 +359,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 )]
 mod tests {
     use super::*;
-    use crate::seal::argon2_block_from_salt;
-    use crate::test_support::*;
-    use crate::*;
+    use crate::{seal::argon2_block_from_salt, test_support::*, *};
 
     /// The version field: magic is 14 bytes, then a little-endian `u16`.
     #[expect(
