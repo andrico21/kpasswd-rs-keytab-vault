@@ -194,6 +194,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      # fuzz/ is its own workspace, so the step above never formats it; this
+      # checks the harness (and, through its path dependency, the crate again).
+      - name: Check the fuzz harness's formatting
+        run: cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
+
       # KRP-57: taplo checks TOML syntax (`taplo check`) and formatting
       # (`taplo fmt --check`) for every file .taplo.toml includes;
       # supply-chain/ is cargo-vet's and is parsed by `cargo vet --locked`.
@@ -209,18 +214,18 @@ jobs:
       # Cargo.toml (the rust-guidelines rust-1.99-r3 section 9 table, copied
       # unchanged); -D warnings promotes any residual warning.
       - name: Clippy (deny warnings)
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
       # The fuzz harness is its own workspace, so the step above never sees
       # it; it carries the same lint profile (scripts/check-drift.sh).
       - name: Clippy on the fuzz harness (deny warnings)
-        run: cargo clippy --locked --all-targets --manifest-path fuzz/Cargo.toml -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features --manifest-path fuzz/Cargo.toml -- -D warnings
 
       # `allow_attributes` sees only outer `#[allow]`; an inner `#![allow]`
       # would pass it unseen, so the guidelines gate on this grep instead.
       - name: No inner allow attributes
         run: |
-          found=$(grep -rn --include='*.rs' '#!\[allow(' src tests || true)
+          found=$(grep -rn --include='*.rs' '#!\[allow(' src tests fuzz/fuzz_targets || true)
           if [ -n "$found" ]; then
             echo "::error::inner #![allow] found; use #![expect(lint, reason = \"...\")]:"
             echo "$found"
@@ -228,7 +233,34 @@ jobs:
           fi
 
       - name: Check rustc warnings (build.warnings=deny)
-        run: cargo check --locked --all-targets --keep-going
+        run: cargo check --locked --all-targets --all-features --keep-going
+
+  nightly-lint:
+    name: Lint (dated nightly, rustfmt imports + docs.rs rustdoc)
+    runs-on: ubuntu-latest
+    # rustfmt.toml's import options are nightly-only, and docs.rs documents the
+    # crate with a nightly rustdoc and `--cfg docsrs`. Both run on one dated
+    # nightly, pinned like every other input (KRP-57): check-drift.sh requires
+    # it to stay dated, and scripts/ci-local.sh reads it from here.
+    # rust-toolchain.toml would otherwise select 1.99.1, so every call names the
+    # pin with `cargo +`.
+    env:
+      NIGHTLY_TOOLCHAIN: nightly-2026-10-03
+      CARGO_BUILD_WARNINGS: deny
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
+        with:
+          toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
+          components: rustfmt
+      - name: Check formatting (nightly import options)
+        run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} fmt --all -- --check
+      - name: Check the fuzz harness's formatting (nightly import options)
+        run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} fmt --all --manifest-path fuzz/Cargo.toml -- --check
+      - name: Build the doc surface as docs.rs does (rustdoc lints denied)
+        env:
+          RUSTDOCFLAGS: "-D warnings --cfg docsrs"
+        run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} doc --locked --no-deps --all-features
 
   build-linux:
     name: Build & Test (Linux)
@@ -251,7 +283,7 @@ jobs:
       - name: Build the doc surface (rustdoc lints denied, warnings are errors)
         env:
           RUSTDOCFLAGS: "-D warnings"
-        run: cargo doc --locked --no-deps
+        run: cargo doc --locked --no-deps --all-features
 
   build-windows:
     name: Build (Windows)
@@ -274,7 +306,7 @@ jobs:
       - name: Check the crate compiles for Windows
         env:
           RUSTFLAGS: "-C control-flow-guard=yes -C link-args=/DYNAMICBASE -C link-args=/HIGHENTROPYVA -C link-args=/NXCOMPAT -C link-args=/CETCOMPAT"
-        run: cargo check --locked --all-targets --verbose
+        run: cargo check --locked --all-targets --all-features --verbose
 
       # Clippy on the Windows target: code compiled only there - and items
       # or imports left unused once the Linux-only tests drop out - is
@@ -283,7 +315,7 @@ jobs:
       - name: Clippy for Windows (deny warnings)
         env:
           RUSTFLAGS: "-C control-flow-guard=yes -C link-args=/DYNAMICBASE -C link-args=/HIGHENTROPYVA -C link-args=/NXCOMPAT -C link-args=/CETCOMPAT"
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
   msrv:
     name: MSRV (1.99.0)

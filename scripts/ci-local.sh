@@ -3,8 +3,8 @@
 # Best-effort local equivalent of .github/workflows/rust.yaml.
 #
 # This repository has exactly one automated gate besides GitHub Actions: this
-# script. It reproduces the `lint`, `security`, `build-linux` and `msrv` jobs at the
-# same strictness.
+# script. It reproduces the `lint`, `nightly-lint`, `security`, `build-linux` and
+# `msrv` jobs at the same strictness.
 #
 # Not one-for-one. Two gaps, stated here because "I ran CI" should not
 # overstate what ran:
@@ -18,7 +18,7 @@
 #     advisory (section 12 classes fuzzing informational).
 #
 # Usage: scripts/ci-local.sh [job ...]
-#   Jobs: lint security build-linux build-windows msrv (default: all five)
+#   Jobs: lint nightly-lint security build-linux build-windows msrv (default: all six)
 #
 # Optional tools that CI marks `continue-on-error: true` (cargo-geiger) are
 # skipped with a notice when absent rather than failing; everything gating in
@@ -79,30 +79,60 @@ job_lint() {
     fi'
   run "scripts/check-drift.sh" bash scripts/check-drift.sh
 
-  run "cargo fmt --all -- --check" cargo fmt --all -- --check
+  run "rustfmt: cargo fmt --all -- --check" cargo fmt --all -- --check
+  run "rustfmt (fuzz harness): cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check" cargo fmt --all --manifest-path fuzz/Cargo.toml -- --check
   run "taplo check" taplo check
   run "taplo fmt --check" taplo fmt --check
 
   # The doc surface: the lint table denies every rustdoc lint, and only
   # `cargo doc` exercises them.
-  run "RUSTDOCFLAGS=-Dwarnings cargo doc --locked --no-deps" \
-    env RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+  run "rustdoc: RUSTDOCFLAGS=-Dwarnings cargo doc --locked --no-deps --all-features" \
+    env RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --all-features
 
   run "cargo test --locked (the crate's suite)" cargo test --locked
 
   # The crate enables all+pedantic+restriction+cargo at "deny" via
   # `[workspace.lints]` in Cargo.toml; -D warnings promotes any residual
   # warning.
-  run "cargo clippy --locked --all-targets -- -D warnings" \
-    cargo clippy --locked --all-targets -- -D warnings
-  run "cargo clippy --locked --all-targets --manifest-path fuzz/Cargo.toml -- -D warnings" cargo clippy --locked --all-targets --manifest-path fuzz/Cargo.toml -- -D warnings
-  run "cargo check --locked --all-targets --keep-going (build.warnings=deny)" \
-    cargo check --locked --all-targets --keep-going
+  run "clippy: cargo clippy --locked --all-targets --all-features -- -D warnings" \
+    cargo clippy --locked --all-targets --all-features -- -D warnings
+  run "clippy (fuzz harness): cargo clippy --locked --all-targets --all-features --manifest-path fuzz/Cargo.toml -- -D warnings" cargo clippy --locked --all-targets --all-features --manifest-path fuzz/Cargo.toml -- -D warnings
+  run "cargo check --locked --all-targets --all-features --keep-going (build.warnings=deny)" \
+    cargo check --locked --all-targets --all-features --keep-going
   # `allow_attributes` sees only outer `#[allow]`; an inner `#![allow]` would
   # pass it unseen, so the guidelines gate on this grep instead.
   run "no inner #![allow] attributes" bash -c '
-    found=$(grep -rn --include="*.rs" "#!\[allow(" src tests || true)
+    found=$(grep -rn --include="*.rs" "#!\[allow(" src tests fuzz/fuzz_targets || true)
     [ -z "$found" ] || { echo "inner #![allow] found; use #![expect]:"; echo "$found"; exit 1; }'
+}
+
+job_nightly_lint() {
+  section "Lint (dated nightly, rustfmt imports + docs.rs rustdoc)"
+  # The pin lives in the workflow's nightly-lint job; reading it here keeps the
+  # two from drifting. Exactly one dated NIGHTLY_TOOLCHAIN line is expected.
+  local pins nightly
+  pins=$(sed -n 's/^[[:space:]]*NIGHTLY_TOOLCHAIN:[[:space:]]*"\{0,1\}\(nightly-[0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)"\{0,1\}[[:space:]]*\(#.*\)\{0,1\}$/\1/p' .github/workflows/rust.yaml)
+  if [ "$(printf '%s\n' "$pins" | grep -c .)" -ne 1 ]; then
+    printf '\nFAIL: expected exactly one dated NIGHTLY_TOOLCHAIN in .github/workflows/rust.yaml, found: %s\n' "${pins:-none}"
+    FAILURES=$((FAILURES + 1))
+    FAILED_JOBS+=("nightly pin unreadable")
+    return
+  fi
+  nightly=$pins
+  if ! rustup toolchain list | grep -q "^${nightly}-"; then
+    printf '\nFAIL: toolchain %s not installed (run: rustup toolchain install %s --profile minimal --component rustfmt)\n' \
+      "$nightly" "$nightly"
+    FAILURES=$((FAILURES + 1))
+    FAILED_JOBS+=("nightly toolchain missing")
+    return
+  fi
+  run "rustfmt (nightly import options): cargo +$nightly fmt --all -- --check" \
+    cargo +"$nightly" fmt --all -- --check
+  run "rustfmt (nightly, fuzz harness): cargo +$nightly fmt --all --manifest-path fuzz/Cargo.toml -- --check" \
+    cargo +"$nightly" fmt --all --manifest-path fuzz/Cargo.toml -- --check
+  run "rustdoc as docs.rs builds it: cargo +$nightly doc --locked --no-deps --all-features" \
+    env RUSTDOCFLAGS="-D warnings --cfg docsrs" CARGO_BUILD_WARNINGS=deny CARGO_TARGET_DIR=target/nightly \
+    cargo +"$nightly" doc --locked --no-deps --all-features
 }
 
 job_security() {
@@ -185,12 +215,12 @@ job_build_windows() {
     return
   fi
 
-  run "cargo check --locked --target $WINDOWS_TARGET --all-targets (the crate must stay portable)" \
+  run "cargo check --locked --target $WINDOWS_TARGET --all-targets --all-features (the crate must stay portable)" \
     env RUSTFLAGS="$windows_flags" \
-    cargo check --locked --target "$WINDOWS_TARGET" --all-targets
-  run "cargo clippy --locked --target $WINDOWS_TARGET --all-targets -- -D warnings" \
+    cargo check --locked --target "$WINDOWS_TARGET" --all-targets --all-features
+  run "clippy (Windows): cargo clippy --locked --target $WINDOWS_TARGET --all-targets --all-features -- -D warnings" \
     env RUSTFLAGS="$windows_flags" \
-    cargo clippy --locked --target "$WINDOWS_TARGET" --all-targets -- -D warnings
+    cargo clippy --locked --target "$WINDOWS_TARGET" --all-targets --all-features -- -D warnings
 }
 
 job_msrv() {
@@ -217,18 +247,19 @@ job_msrv() {
 
 JOBS=("$@")
 if [ ${#JOBS[@]} -eq 0 ]; then
-  JOBS=(lint security build-linux build-windows msrv)
+  JOBS=(lint nightly-lint security build-linux build-windows msrv)
 fi
 
 for job in "${JOBS[@]}"; do
   case "$job" in
     lint) job_lint ;;
+    nightly-lint) job_nightly_lint ;;
     security) job_security ;;
     build-linux) job_build_linux ;;
     build-windows) job_build_windows ;;
     msrv) job_msrv ;;
     *)
-      printf 'unknown job: %s (want: lint security build-linux build-windows msrv)\n' "$job" >&2
+      printf 'unknown job: %s (want: lint nightly-lint security build-linux build-windows msrv)\n' "$job" >&2
       exit 2
       ;;
   esac
