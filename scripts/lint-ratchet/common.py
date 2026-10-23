@@ -1,0 +1,498 @@
+# Ported from rmcp-server-kit scripts/lint-ratchet/common.py at
+# b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
+# Local deltas: `iter_rust_files` also scans `fuzz/fuzz_targets`; `_classify` reads every `cfg_attr` argument after the predicate (rmcp's read only the last one).
+#!/usr/bin/env python3
+"""Shared, stdlib-only parsers for the lint-ratchet gates.
+
+Everything here is byte-exact: :func:`strip_comments_and_strings` preserves the
+length of its input (and every ``\\n`` / ``\\r``) so offsets and line numbers map
+1:1 onto the original source.  The gates locate attributes on the stripped text
+and read string contents (reasons) out of the original at the same offsets.
+
+Runnable standalone: ``python3 common.py --self-test`` runs the inline fixtures.
+"""
+from __future__ import annotations
+
+import re
+import sys
+
+LEVELS = ("deny", "warn", "allow", "forbid")
+
+_LINT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$")
+_RAW_RE = re.compile(r'(?:[bc]r|r)(#*)?"')
+_LEADING_IDENT_RE = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)")
+
+
+# ---------------------------------------------------------------------------
+# Comment / string stripping
+# ---------------------------------------------------------------------------
+def strip_comments_and_strings(src: str, *, keep_literals: bool = False) -> str:
+    """Blank ``//`` and nested ``/* */`` comments, normal/raw strings and char
+    literals, replacing every consumed (non-newline) character with a space.
+
+    With ``keep_literals=True`` only comments are blanked: string, raw-string and
+    char literals are still skipped over (so ``//`` or ``/*`` inside one never
+    starts a comment) but are left intact.
+
+    Length and line structure are preserved exactly, so an offset into the
+    result is the same offset into *src*.
+    """
+    n = len(src)
+    out = list(src)
+
+    def blank(a: int, b: int) -> None:
+        for k in range(a, b):
+            if out[k] not in ("\n", "\r"):
+                out[k] = " "
+
+    def blank_literal(a: int, b: int) -> None:
+        if not keep_literals:
+            blank(a, b)
+
+    i = 0
+    while i < n:
+        c = src[i]
+        if c == "/" and i + 1 < n and src[i + 1] == "/":
+            j = i + 2
+            while j < n and src[j] != "\n":
+                j += 1
+            blank(i, j)
+            i = j
+            continue
+        if c == "/" and i + 1 < n and src[i + 1] == "*":
+            depth = 1
+            j = i + 2
+            while j < n and depth:
+                if src[j] == "/" and j + 1 < n and src[j + 1] == "*":
+                    depth += 1
+                    j += 2
+                elif src[j] == "*" and j + 1 < n and src[j + 1] == "/":
+                    depth -= 1
+                    j += 2
+                else:
+                    j += 1
+            blank(i, j)
+            i = j
+            continue
+        m = _RAW_RE.match(src, i)
+        if m:
+            hashes = m.group(1)
+            q = m.end() - 1
+            close = src.find('"' + hashes, q + 1)
+            j = n if close < 0 else close + 1 + len(hashes)
+            blank_literal(i, j)
+            i = j
+            continue
+        if c == '"' or (c in "bc" and i + 1 < n and src[i + 1] == '"'):
+            q = i if c == '"' else i + 1
+            j = q + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            blank_literal(i, j)
+            i = j
+            continue
+        if c == "'" or (c == "b" and i + 1 < n and src[i + 1] == "'"):
+            k = i + 1 if c == "'" else i + 2
+            if k < n and src[k] == "\\":
+                j = k + 2
+                while j < n and src[j] != "'":
+                    j += 1
+                j = j + 1 if j < n else n
+                blank_literal(i, j)
+                i = j
+                continue
+            if k + 1 < n and src[k + 1] == "'" and src[k] != "'":
+                blank_literal(i, k + 2)
+                i = k + 2
+                continue
+        i += 1
+    return "".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Low-level helpers
+# ---------------------------------------------------------------------------
+def line_of(src: str, idx: int) -> int:
+    return src.count("\n", 0, idx) + 1
+
+
+def match_bracket(src: str, open_idx: int) -> int | None:
+    """Index of the bracket closing ``src[open_idx]`` (``(``->``)``, ``[``->``]``,
+    ``{``->``}``), or ``None``.  Input must already be comment/string stripped."""
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    open_ch = src[open_idx]
+    close_ch = pairs[open_ch]
+    depth = 0
+    for j in range(open_idx, len(src)):
+        if src[j] == open_ch:
+            depth += 1
+        elif src[j] == close_ch:
+            depth -= 1
+            if depth == 0:
+                return j
+    return None
+
+
+def split_top_level(text: str) -> list[tuple[int, int]]:
+    """Split *text* on commas at bracket depth zero; return ``(start, end)`` spans."""
+    spans: list[tuple[int, int]] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            spans.append((start, i))
+            start = i + 1
+    spans.append((start, len(text)))
+    return spans
+
+
+def _string_at(text: str, pos: int) -> tuple[str | None, int]:
+    """Parse the first ``"..."`` string at/after *pos* in *text*."""
+    i = text.find('"', pos)
+    if i < 0:
+        return None, len(text)
+    j = i + 1
+    buf: list[str] = []
+    while j < len(text):
+        ch = text[j]
+        if ch == "\\":
+            if j + 1 >= len(text):
+                break
+            nxt = text[j + 1]
+            buf.append({"n": "\n", "r": "\r", "t": "\t", "0": "\0"}.get(nxt, nxt))
+            j += 2
+            continue
+        if ch == '"':
+            return "".join(buf), j + 1
+        buf.append(ch)
+        j += 1
+    return None, len(text)
+
+
+# ---------------------------------------------------------------------------
+# Attribute parsing
+# ---------------------------------------------------------------------------
+def iter_attributes(src):
+    """Yield ``(start, end, inner, body)`` for every ``#[...]`` / ``#![...]`` in
+    already-stripped *src*.  ``body`` excludes the brackets."""
+    i = 0
+    n = len(src)
+    while i < n:
+        if src[i] == "#":
+            j = i + 1
+            inner = False
+            if j < n and src[j] == "!":
+                inner = True
+                j += 1
+            if j < n and src[j] == "[":
+                close = match_bracket(src, j)
+                if close is not None:
+                    yield (i, close + 1, inner, src[j + 1:close])
+                    i = close + 1
+                    continue
+        i += 1
+
+
+def _classify(body: str, abs_start: int, original: str, predicates: list[str]):
+    """Classify one attribute body; return a list of call records.
+
+    A call record is a dict with ``form`` (``allow``/``expect``), ``lints``,
+    ``reason``, ``predicate`` (``None`` or the ``cfg_attr`` guard text), and the
+    absolute ``kw_start``/``kw_end`` of the ``allow``/``expect`` keyword.
+    """
+    m = _LEADING_IDENT_RE.match(body)
+    if not m:
+        return []
+    name = m.group(1)
+    p = m.end()
+    while p < len(body) and body[p].isspace():
+        p += 1
+    if p >= len(body) or body[p] != "(":
+        return []
+    close = match_bracket(body, p)
+    inner = body[p + 1:close] if close is not None else body[p + 1:]
+    args = split_top_level(inner)
+
+    if name == "cfg_attr":
+        if len(args) < 2:
+            return []
+        predicate = inner[args[0][0]:args[0][1]].strip()
+        records = []
+        for a, b in args[1:]:
+            if not inner[a:b].strip():
+                continue
+            nested_start = p + 1 + a
+            nested = body[nested_start:p + 1 + b]
+            records.extend(_classify(nested, abs_start + nested_start, original,
+                                     predicates + [predicate]))
+        return records
+
+    if name not in ("allow", "expect"):
+        return []
+
+    lints: list[str] = []
+    reason: str | None = None
+    kw_start = abs_start + m.start(1)
+    for a, b in args:
+        text = inner[a:b]
+        if "=" in text:
+            key = text.split("=", 1)[0].strip()
+            if key == "reason":
+                eq = abs_start + p + 1 + a + text.index("=")
+                reason, _ = _string_at(original, eq)
+        else:
+            cand = text.strip()
+            if _LINT_RE.match(cand):
+                lints.append(cand)
+    predicate = None
+    if predicates:
+        predicate = predicates[0] if len(predicates) == 1 else "all(" + ", ".join(predicates) + ")"
+    return [{
+        "form": name,
+        "lints": lints,
+        "reason": reason,
+        "predicate": predicate,
+        "kw_start": kw_start,
+        "kw_end": kw_start + len(name),
+    }]
+
+
+def attribute_calls(original: str, stripped: str | None = None):
+    """Return every ``allow``/``expect`` call found in attributes of *original*."""
+    stripped = strip_comments_and_strings(original) if stripped is None else stripped
+    records = []
+    for start, _end, inner, body in iter_attributes(stripped):
+        body_abs = start + (3 if inner else 2)
+        records.extend(_classify(body, body_abs, original, []))
+    return records
+
+
+# ---------------------------------------------------------------------------
+# cfg(test) scope
+# ---------------------------------------------------------------------------
+def _is_test_cfg(body: str) -> bool:
+    def implies_test(predicate: str) -> bool:
+        predicate = predicate.strip()
+        m = _LEADING_IDENT_RE.match(predicate)
+        if not m:
+            return False
+        name = m.group(1)
+        p = m.end()
+        while p < len(predicate) and predicate[p].isspace():
+            p += 1
+        if name == "test" and p == len(predicate):
+            return True
+        if name not in ("all", "any") or p >= len(predicate) or predicate[p] != "(":
+            return False
+        close = match_bracket(predicate, p)
+        if close is None or predicate[close + 1:].strip():
+            return False
+        inner = predicate[p + 1:close]
+        children = [inner[a:b] for a, b in split_top_level(inner)]
+        if name == "all":
+            return any(implies_test(child) for child in children)
+        return all(implies_test(child) for child in children)
+
+    t = body.strip()
+    if not t.startswith("cfg("):
+        return False
+    open_ = t.find("(")
+    close = match_bracket(t, open_)
+    if close is None or t[close + 1:].strip():
+        return False
+    return implies_test(t[open_ + 1:close])
+
+
+def cfg_test_line_ranges(stripped: str) -> list[tuple[int, int]]:
+    """Line ranges (1-based, inclusive) of items gated by a ``cfg`` predicate
+    that implies ``test``. A feature that also enables an item in non-test
+    builds is not treated as test-only."""
+    ranges: list[tuple[int, int]] = []
+    for start, end, _inner, body in iter_attributes(stripped):
+        if not _is_test_cfg(body):
+            continue
+        tail = stripped[end:]
+        brace = tail.find("{")
+        semi = tail.find(";")
+        if brace < 0 and semi < 0:
+            continue
+        if brace >= 0 and (semi < 0 or brace < semi):
+            open_abs = end + brace
+            close = match_bracket(stripped, open_abs)
+            if close is None:
+                close = len(stripped) - 1
+            ranges.append((line_of(stripped, start), line_of(stripped, close)))
+        else:
+            stop = end + semi
+            ranges.append((line_of(stripped, start), line_of(stripped, stop)))
+    return ranges
+
+
+def in_ranges(line: int, ranges) -> bool:
+    return any(a <= line <= b for a, b in ranges)
+
+
+# ---------------------------------------------------------------------------
+# Source discovery
+# ---------------------------------------------------------------------------
+def iter_rust_files(root):
+    import pathlib
+    root = pathlib.Path(root)
+    for base in ("src", "tests", "benches", "examples", "fuzz/fuzz_targets"):
+        d = root / base
+        if not d.is_dir():
+            continue
+        for p in sorted(d.rglob("*.rs")):
+            if "target" in p.parts:
+                continue
+            yield p
+
+
+def read_source(path):
+    """Return ``(original, stripped)``; newlines are preserved verbatim."""
+    raw = path.read_bytes().decode("utf-8")
+    return raw, strip_comments_and_strings(raw)
+
+
+# ---------------------------------------------------------------------------
+# Self-test
+# ---------------------------------------------------------------------------
+def _self_test() -> int:
+    failures = []
+
+    def check(label, cond):
+        if not cond:
+            failures.append(label)
+
+    # comments / strings containing allow( are blanked; length is preserved.
+    src = (
+        "// #[allow(clippy::x)]\n"
+        "/* nested /* #[allow(a)] */ still */\n"
+        'let s = "#[allow(b)] r#\\"#[allow(c)]\\"#";\n'
+        "let c = 'x'; let l = 'static;\n"
+        "#[allow(clippy::real, clippy::other)]\n"
+        "fn f() {}\n"
+    )
+    st = strip_comments_and_strings(src)
+    check("strip length", len(st) == len(src))
+    check("strip newlines", st.count("\n") == src.count("\n"))
+    check("strip line-comment", "allow(clippy::x)" not in st)
+    check("strip block-comment", "allow(a)" not in st)
+    check("strip string", "allow(b)" not in st and "allow(c)" not in st)
+    check("strip keeps code", "#[allow(clippy::real, clippy::other)]" in st)
+
+    calls = attribute_calls(src, st)
+    allow_calls = [c for c in calls if c["form"] == "allow"]
+    check("one real allow attribute", len(allow_calls) == 1)
+    check("multi-lint list", allow_calls and allow_calls[0]["lints"] == ["clippy::real", "clippy::other"])
+    check("allow line", allow_calls and line_of(st, allow_calls[0]["kw_start"]) == 5)
+
+    # escaped char literal '\'' must not leak a quote.
+    st2 = strip_comments_and_strings("let q = '\\''; #[expect(x, reason = \"r\")]")
+    check("escaped char", "#[expect(x" in st2)
+    check("escaped char length", len(st2) == len("let q = '\\''; #[expect(x, reason = \"r\")]"))
+
+    # raw strings with hashes.
+    st3 = strip_comments_and_strings('let r = r#"a \\" b"#; #[allow(y)]')
+    check("raw string", "#[allow(y)]" in st3 and "a" not in st3.split("#[")[0])
+
+    # keep_literals: comments blanked, literals kept.
+    kl_src = 'f(x, /* c */ "a // b", \'"\') // t'
+    kl = strip_comments_and_strings(kl_src, keep_literals=True)
+    check("keep_literals length", len(kl) == len(kl_src))
+    check("keep_literals keeps literals", '"a // b"' in kl and "'\"'" in kl)
+    check("keep_literals blanks comments", "/* c */" not in kl and "// t" not in kl)
+
+    # nested cfg_attr(expect(..)) with reason.
+    nested = '#[cfg_attr(test, expect(clippy::unwrap_used, reason = "lint-migration: src/x.rs"))]'
+    ns = strip_comments_and_strings(nested)
+    nc = attribute_calls(nested, ns)
+    check("nested cfg_attr expect", len(nc) == 1 and nc[0]["form"] == "expect")
+    check("nested predicate", nc and nc[0]["predicate"] == "test")
+    check("nested reason", nc and nc[0]["reason"] == "lint-migration: src/x.rs")
+    check("nested lints", nc and nc[0]["lints"] == ["clippy::unwrap_used"])
+
+    # CRLF bytes are preserved by the stripper.
+    crlf = 'let a = 1;\r\n#[allow(z)]\r\n'
+    sc = strip_comments_and_strings(crlf)
+    check("crlf length", len(sc) == len(crlf))
+    check("crlf count", sc.count("\r\n") == 2)
+    check("crlf keeps allow", "#[allow(z)]" in sc)
+
+    # cfg(test) module ranges: nested braces handled; only cfgs that imply test
+    # are treated as test-only.
+    modsrc = (
+        "#[cfg(test)]\n"
+        "mod tests {\n"
+        "    fn t() { if true { } }\n"
+        "}\n"
+        "#[cfg(feature = \"test-helpers\")]\n"
+        "mod helpers {}\n"
+        "#[cfg(any(test, feature = \"test-helpers\"))]\n"
+        "mod both {}\n"
+        "#[cfg(all(test, unix))]\n"
+        "mod unix_tests {}\n"
+        "#[cfg(not(test))]\n"
+        "mod not_tests {}\n"
+    )
+    ms = strip_comments_and_strings(modsrc)
+    rng = cfg_test_line_ranges(ms)
+    check("cfg(test) module range", (1, 4) in rng)
+    check("test-helpers not a test range", not in_ranges(6, rng))
+    check("any(test,..) is not a test range", not in_ranges(8, rng))
+    check("all(test,..) is a test range", in_ranges(10, rng))
+    check("not(test) is not a test range", not in_ranges(12, rng))
+
+    # Local delta: fuzz/fuzz_targets is scanned, fuzz/target is not.
+    import pathlib
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        troot = pathlib.Path(tmp)
+        for rel in ("fuzz/fuzz_targets/a.rs", "fuzz/target/b.rs", "src/c.rs"):
+            (troot / rel).parent.mkdir(parents=True, exist_ok=True)
+            (troot / rel).write_text("fn x() {}\n")
+        found = [p.relative_to(troot).as_posix() for p in iter_rust_files(troot)]
+        check("fuzz_targets scanned", "fuzz/fuzz_targets/a.rs" in found)
+        check("src scanned", "src/c.rs" in found)
+        check("fuzz/target not scanned", "fuzz/target/b.rs" not in found)
+
+    # Local delta: every cfg_attr argument after the predicate is classified.
+    def calls(text):
+        return attribute_calls(text, strip_comments_and_strings(text))
+
+    r = calls("#[cfg_attr(test, allow(dead_code), inline)]\nfn a() {}\n")
+    check("cfg_attr multi-arg allow", len(r) == 1 and r[0]["form"] == "allow"
+          and r[0]["lints"] == ["dead_code"] and r[0]["predicate"] == "test")
+    r = calls("#[cfg_attr(test, expect(clippy::panic, reason = \"because\"), inline)]\nfn b() {}\n")
+    check("cfg_attr multi-arg expect", len(r) == 1 and r[0]["form"] == "expect"
+          and r[0]["reason"] == "because")
+    r = calls("#[cfg_attr(test, allow(dead_code),)]\nfn c() {}\n")
+    check("cfg_attr trailing comma", len(r) == 1 and r[0]["form"] == "allow")
+    r = calls("#[cfg_attr(test, allow(dead_code), expect(clippy::panic, reason = \"r\"))]\nfn d() {}\n")
+    check("cfg_attr allow then expect",
+          [x["form"] for x in r] == ["allow", "expect"])
+
+    if failures:
+        for f in failures:
+            print(f"FAIL: {f}", file=sys.stderr)
+        print(f"common self-test: {len(failures)} failure(s)", file=sys.stderr)
+        return 1
+    print("common self-test: ok")
+    return 0
+
+
+if __name__ == "__main__":
+    if "--self-test" in sys.argv:
+        sys.exit(_self_test())
+    print("usage: common.py --self-test", file=sys.stderr)
+    sys.exit(2)
