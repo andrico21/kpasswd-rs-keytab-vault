@@ -559,17 +559,23 @@ pub(crate) fn parse_slot(
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::too_long_first_doc_paragraph,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     use super::*;
     use crate::{test_support::*, *};
 
     /// A file that is not an envelope at all is rejected on the magic.
     #[test]
-    fn magic_rejected() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/format.rs::magic_rejected keeps the uniform test signature while it only asserts"
+    )]
+    fn magic_rejected() -> TestResult {
         assert!(
             matches!(
                 KeytabEnvelope::parse(b"not an envelope at all, far too short"),
@@ -581,18 +587,15 @@ mod tests {
             !kpasswd_rs::is_envelope(b"plain keytab bytes"),
             "a plain keytab is not an envelope"
         );
+        Ok(())
     }
 
     /// A truncated file is rejected on the length identity, before any
     /// cryptographic work.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn truncated_blob_rejected() {
+    fn truncated_blob_rejected() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let cut = blob.len().saturating_sub(1);
         let truncated = blob.get(..cut).unwrap_or_default();
         assert!(
@@ -602,18 +605,15 @@ mod tests {
             ),
             "a truncated file must fail the length identity"
         );
+        Ok(())
     }
 
     /// A file whose declared length does not match its size is rejected:
     /// this is what rejects trailing bytes after the tag.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn trailing_bytes_rejected() {
+    fn trailing_bytes_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         blob.push(0);
         assert!(
             matches!(
@@ -622,18 +622,15 @@ mod tests {
             ),
             "trailing bytes must fail the length identity"
         );
+        Ok(())
     }
 
     /// An unknown algorithm byte is rejected: v1 defines no forward-compatible
     /// skipping.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn unknown_alg_rejected() {
+    fn unknown_alg_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // Byte 20 is `payload_alg`: magic 14, version 2, header_len 4.
         if let Some(byte) = blob.get_mut(20) {
             *byte = 0x7f;
@@ -645,17 +642,17 @@ mod tests {
             ),
             "an undefined payload algorithm must be rejected"
         );
+        Ok(())
     }
 
     /// A version this build does not speak is rejected immediately after the
     /// magic. There is one accepted value (KRP-93): any other version is
     /// refused here, on the version, and no second version parses.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn unsupported_envelope_version_is_refused_on_version() {
+    fn unsupported_envelope_version_is_refused_on_version() -> TestResult {
         for unsupported in [u16::MIN, 2, u16::MAX] {
             let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-                .unwrap_or_else(|error| panic!("seal failed: {error}"));
+                .map_err(|error| format!("seal failed: {error}"))?;
             if let Some(field) = blob.get_mut(14..16) {
                 field.copy_from_slice(&unsupported.to_le_bytes());
             }
@@ -667,18 +664,15 @@ mod tests {
                 "version {unsupported} must be refused on the version"
             );
         }
+        Ok(())
     }
 
     /// `slot_count` of zero is rejected: a blob nobody can unlock is not a
     /// keytab wrapper.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn slot_count_zero_rejected() {
+    fn slot_count_zero_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // Byte 69 is `slot_count`: magic 14, version 2, header_len 4,
         // payload_alg 1, payload_nonce 24, payload_len 8, file_id 16.
         if let Some(byte) = blob.get_mut(69) {
@@ -691,18 +685,15 @@ mod tests {
             ),
             "a slot count of zero must be rejected"
         );
+        Ok(())
     }
 
     /// `u8` admits 9-255 slots; the v1 cap is 8, and 255 is rejected
     /// explicitly.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn slot_count_255_rejected() {
+    fn slot_count_255_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         if let Some(byte) = blob.get_mut(69) {
             *byte = 0xff;
         }
@@ -713,17 +704,14 @@ mod tests {
             ),
             "255 slots must be rejected"
         );
+        Ok(())
     }
 
     /// The slots must fill `header_len` exactly: no padding, no shortfall.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn header_padding_rejected() {
+    fn header_padding_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // Claim three more header bytes than the slots consumed *and* three
         // fewer payload bytes, so the length identity still holds and only
         // the exact-fill rule can reject this file.
@@ -741,18 +729,15 @@ mod tests {
             ),
             "a header that is not exactly filled must be rejected"
         );
+        Ok(())
     }
 
     /// A slot whose `slot_type` and `kek_alg` disagree is rejected: the
     /// pairing is structural, checked for every slot.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn type_alg_mismatch_rejected() {
+    fn type_alg_mismatch_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // The raw-key slot's `kek_alg` byte: header 70, slot_id 4,
         // slot_type 1, slot_label_len 1, label "operator" 8.
         if let Some(byte) = blob.get_mut(84) {
@@ -765,24 +750,21 @@ mod tests {
             ),
             "a raw-key slot naming Argon2id must be rejected"
         );
+        Ok(())
     }
 
     /// A raw-key slot carrying KDF bytes is rejected: the stray block shifts
     /// the `wrap_alg` byte, which is then not a defined algorithm.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn raw_key_slot_with_kdf_bytes_rejected() {
+    fn raw_key_slot_with_kdf_bytes_rejected() -> TestResult {
         let base = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let with_block = seal(
             PLAINTEXT,
             &[passphrase_recipient(7, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         // Build the corrupt shape: the raw-key slot's prefix with the
         // passphrase slot's 36 KDF bytes spliced in after `kek_alg`. The
         // declared header length grows with it, so only the shifted
@@ -802,6 +784,7 @@ mod tests {
             ),
             "a raw-key slot carrying KDF bytes must be rejected"
         );
+        Ok(())
     }
 
     /// Where one slot's serialized bytes start in the file: the wrapped DEK's
@@ -839,17 +822,13 @@ mod tests {
 
     /// Two slots with the same id are rejected: an id must name one slot.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn duplicate_slot_id_rejected() {
+    fn duplicate_slot_id_rejected() -> TestResult {
         let mut blob = seal(
             PLAINTEXT,
             &[raw_recipient(3, "one"), raw_recipient(4, "two")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let second = slot_start(&blob, 1);
         overwrite_bytes(&mut blob, second, &3_u32.to_le_bytes());
         assert!(
@@ -859,22 +838,19 @@ mod tests {
             ),
             "two slots sharing an id must be rejected"
         );
+        Ok(())
     }
 
     /// Two slots with the same label are rejected: a label is selectable, so
     /// a duplicate is a selection ambiguity.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn duplicate_slot_label_rejected() {
+    fn duplicate_slot_label_rejected() -> TestResult {
         let mut blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "aaaa"), raw_recipient(2, "bbbb")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let second_label = slot_start(&blob, 1).saturating_add(LABEL_OFFSET);
         overwrite_bytes(&mut blob, second_label, b"aaaa");
         assert!(
@@ -884,22 +860,19 @@ mod tests {
             ),
             "two slots sharing a label must be rejected"
         );
+        Ok(())
     }
 
     /// A label spelled like an *earlier* slot's decimal id is rejected, so one
     /// name can never mean two slots.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn label_spelled_like_an_earlier_slots_id_rejected() {
+    fn label_spelled_like_an_earlier_slots_id_rejected() -> TestResult {
         let mut blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "x"), raw_recipient(2, "y")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let second_label = slot_start(&blob, 1).saturating_add(LABEL_OFFSET);
         overwrite_bytes(&mut blob, second_label, b"1");
         assert!(
@@ -909,22 +882,19 @@ mod tests {
             ),
             "a label spelled like an earlier slot's id must be rejected"
         );
+        Ok(())
     }
 
     /// A label spelled like a *later* slot's decimal id is rejected too: the
     /// rule is symmetric, so neither file order can smuggle a collision in.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn label_spelled_like_a_later_slots_id_rejected() {
+    fn label_spelled_like_a_later_slots_id_rejected() -> TestResult {
         let mut blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "x"), raw_recipient(2, "y")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let first_label = slot_start(&blob, 0).saturating_add(LABEL_OFFSET);
         overwrite_bytes(&mut blob, first_label, b"2");
         assert!(
@@ -934,18 +904,15 @@ mod tests {
             ),
             "a label spelled like a later slot's id must be rejected"
         );
+        Ok(())
     }
 
     /// A label spelled like its own slot's decimal id is rejected: even a
     /// single-slot file would otherwise carry two spellings of one token.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn label_spelled_like_its_own_id_rejected() {
+    fn label_spelled_like_its_own_id_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "q")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let label = slot_start(&blob, 0).saturating_add(LABEL_OFFSET);
         overwrite_bytes(&mut blob, label, b"7");
         assert!(
@@ -955,6 +922,7 @@ mod tests {
             ),
             "a label spelled like its own slot's id must be rejected"
         );
+        Ok(())
     }
 
     /// A label carrying a character that cannot be rendered is rejected: the
@@ -962,13 +930,9 @@ mod tests {
     /// let a file forge a summary line, and a bidirectional control would let
     /// it reorder one.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn unrenderable_label_rejected() {
+    fn unrenderable_label_rejected() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(7, "abc")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let label = slot_start(&blob, 0).saturating_add(LABEL_OFFSET);
         // Every case is three bytes, the fixture label's length: LF, DEL, a C1
         // control, the line and paragraph separators, and the three
@@ -993,40 +957,34 @@ mod tests {
                 "a label carrying {bytes:?} must be rejected"
             );
         }
+        Ok(())
     }
 
     /// A label of exactly the cap is accepted: 64 bytes is the longest legal
     /// label, and `>=` there would refuse it.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn label_at_the_cap_is_accepted() {
+    fn label_at_the_cap_is_accepted() -> TestResult {
         let label = "a".repeat(MAX_SLOT_LABEL_LEN);
         let blob = seal(PLAINTEXT, &[raw_recipient(7, &label)], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let summaries = envelope.slot_summaries();
         let first = summaries.first().cloned().unwrap_or_default();
         assert!(
             first.contains(&label),
             "a 64-byte label is legal and must survive parsing"
         );
+        Ok(())
     }
 
     /// A header claiming to run to the end of the file is rejected on the
     /// length identity, not on the header bound: the two checks are ordered,
     /// and the variant says which rule caught the file.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn header_length_equal_to_the_file_is_a_length_identity_failure() {
+    fn header_length_equal_to_the_file_is_a_length_identity_failure() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let file_len = u32::try_from(blob.len()).unwrap_or_default();
         for (index, byte) in file_len.to_le_bytes().iter().enumerate() {
             if let Some(cell) = blob.get_mut(16 + index) {
@@ -1040,19 +998,16 @@ mod tests {
             ),
             "a header reaching the end of the file must fail the length identity"
         );
+        Ok(())
     }
 
     /// A payload longer than the cap is rejected on its own rule, before any
     /// length identity or cryptographic work - and `seal` refuses to write such
     /// a file in the first place.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn payload_over_the_cap_rejected() {
+    fn payload_over_the_cap_rejected() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // Bytes 45..53 are `payload_len`: magic 14, version 2, `header_len` 4,
         // `payload_alg` 1, `payload_nonce` 24.
         let over = u64::try_from(MAX_PAYLOAD_LEN.saturating_add(1)).unwrap_or(u64::MAX);
@@ -1066,53 +1021,47 @@ mod tests {
             ),
             "a declared payload over the cap must be rejected on its length rule"
         );
+        Ok(())
     }
 
     /// A payload of exactly the cap is accepted: the length check bounds the
     /// allocation, and an off-by-one there would refuse a legitimate
     /// maximum-size blob.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn payload_at_the_cap_is_accepted() {
+    fn payload_at_the_cap_is_accepted() -> TestResult {
         let plaintext = vec![0x41; MAX_PAYLOAD_LEN];
         let blob = seal(&plaintext, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         let selected = envelope
             .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let opened = selected
             .unlock(&credential, &Argon2Kdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(
             opened.len(),
             MAX_PAYLOAD_LEN,
             "the whole payload round-trips"
         );
+        Ok(())
     }
 
     /// The slot summaries name every slot: a caller shows them when it has to
     /// ask which slot to use, and an empty or constant list would leave nothing
     /// to choose from.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn slot_summaries_name_every_slot() {
+    fn slot_summaries_name_every_slot() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(7, "operator"), passphrase_recipient(8, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let summaries = envelope.slot_summaries();
         assert_eq!(summaries.len(), 2, "both slots are described");
         let first = summaries.first().cloned().unwrap_or_default();
@@ -1125,16 +1074,22 @@ mod tests {
             second.contains('8') && second.contains("pod") && second.contains("passphrase"),
             "the second summary names id, label and kind, got {second}"
         );
+        Ok(())
     }
 
     /// The two error types render a message, and the rendering is stable
     /// enough to show an operator.
     #[test]
-    fn errors_render_messages() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/format.rs::errors_render_messages keeps the uniform test signature while it only asserts"
+    )]
+    fn errors_render_messages() -> TestResult {
         let malformed = EnvelopeError::Malformed(Malformed::SlotCount);
         assert!(
             malformed.to_string().contains("slot count"),
             "the malformed rendering names the violation, got {malformed}"
         );
+        Ok(())
     }
 }
