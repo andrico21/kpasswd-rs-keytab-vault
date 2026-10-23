@@ -593,10 +593,12 @@ fn header_len_for(prefixes: &[Vec<u8>]) -> Result<usize, EnvelopeError> {
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::too_long_first_doc_paragraph,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 pub(crate) mod tests {
     use super::*;
     use crate::{format::KEK_ALG_DIRECT_256, kdf::salt_from_block, test_support::*, *};
@@ -624,8 +626,7 @@ pub(crate) mod tests {
     /// envelope round-trips through parse and unlock. `seal` exists without
     /// `cfg(test)` - this test calls it exactly as a consumer would.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn sealing_round_trips_in_a_shipped_build() {
+    fn sealing_round_trips_in_a_shipped_build() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[
@@ -634,9 +635,9 @@ pub(crate) mod tests {
             ],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         assert_eq!(envelope.slots().len(), 2, "both recipients become slots");
         let by_key = envelope
             .select_slot(
@@ -644,9 +645,9 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &SlotCredential::RawKey(&RAW_KEY),
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"))
+            .map_err(|error| format!("select failed: {error}"))?
             .unlock(&SlotCredential::RawKey(&RAW_KEY), &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(by_key.as_slice(), PLAINTEXT);
         let by_passphrase = envelope
             .select_slot(
@@ -654,10 +655,11 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &SlotCredential::Passphrase(PASSPHRASE),
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"))
+            .map_err(|error| format!("select failed: {error}"))?
             .unlock(&SlotCredential::Passphrase(PASSPHRASE), &Argon2Kdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(by_passphrase.as_slice(), PLAINTEXT);
+        Ok(())
     }
 
     /// KRP-88's headline claim: rotation rewraps one slot and does not
@@ -672,16 +674,15 @@ pub(crate) mod tests {
     /// the opposite for the payload: the old shape could not re-encrypt without
     /// reusing the payload nonce, and reusing it is the defect KRP-93 names.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_keeps_the_data_key_and_other_slots_byte_identical() {
+    fn rotation_keeps_the_data_key_and_other_slots_byte_identical() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let before =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let operator = SlotCredential::RawKey(&RAW_KEY);
         let selection = before
             .select_slot(
@@ -689,19 +690,19 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &operator,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let dek_before = selection
             .unwrap_dek(&operator, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unwrap failed: {error}"));
+            .map_err(|error| format!("unwrap failed: {error}"))?;
         let rotated = rewrap_slot(
             &blob,
             &operator,
             SlotSelector::Label("operator"),
             &raw_recipient_with(1, "operator", &OTHER_KEY),
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let after =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
         let new = SlotCredential::RawKey(&OTHER_KEY);
         let selection_after = after
             .select_slot(
@@ -709,10 +710,10 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &new,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let dek_after = selection_after
             .unwrap_dek(&new, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unwrap failed: {error}"));
+            .map_err(|error| format!("unwrap failed: {error}"))?;
         assert_eq!(
             &*dek_before, &*dek_after,
             "the data key is unchanged: rotation is not re-keying"
@@ -720,14 +721,8 @@ pub(crate) mod tests {
         // The slot the rotation does not touch is the *same bytes*: same prefix,
         // same wrap nonce, same wrapped DEK. That is what a caller reading the
         // file sees, and it is why its credential goes on working.
-        let untouched_before = before
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
-        let untouched_after = after
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
+        let untouched_before = before.slots.get(1).ok_or("the pod slot exists")?;
+        let untouched_after = after.slots.get(1).ok_or("the pod slot exists")?;
         assert_eq!(
             untouched_before.wrap_prefix, untouched_after.wrap_prefix,
             "the non-rotated slot's serialized prefix is byte-identical"
@@ -744,7 +739,7 @@ pub(crate) mod tests {
         assert!(
             after
                 .select_slot(SlotSelector::Label("pod"), &KdfLimits::defaults(), &pod)
-                .unwrap_or_else(|error| panic!("select failed: {error}"))
+                .map_err(|error| format!("select failed: {error}"))?
                 .unlock(&pod, &PanickingKdf)
                 .is_ok(),
             "the untouched pod slot still opens with its own credential"
@@ -765,12 +760,13 @@ pub(crate) mod tests {
                         &KdfLimits::defaults(),
                         &operator
                     )
-                    .unwrap_or_else(|error| panic!("select failed: {error}"))
+                    .map_err(|error| format!("select failed: {error}"))?
                     .unlock(&operator, &PanickingKdf),
                 Err(EnvelopeError::AuthenticationFailed)
             ),
             "the replaced credential must no longer open the rotated slot"
         );
+        Ok(())
     }
 
     /// **The defect this row exists for**: a rotation must re-encrypt the
@@ -782,12 +778,11 @@ pub(crate) mod tests {
     /// property is therefore: after a rotation the payload nonce differs, the
     /// ciphertext differs, and the plaintext and the data key do not.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_reencrypts_payload_with_a_fresh_nonce() {
+    fn rotation_reencrypts_payload_with_a_fresh_nonce() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(9, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let before =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let old = SlotCredential::RawKey(&RAW_KEY);
         let selection = before
             .select_slot(
@@ -795,19 +790,19 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &old,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let dek_before = selection
             .unwrap_dek(&old, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unwrap failed: {error}"));
+            .map_err(|error| format!("unwrap failed: {error}"))?;
         let rotated = rewrap_slot(
             &blob,
             &old,
             SlotSelector::Label("operator"),
             &raw_recipient_with(9, "operator", &OTHER_KEY),
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let after =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
         assert_ne!(
             before.payload_nonce, after.payload_nonce,
             "a rotation must draw a fresh payload nonce, or the payload AEAD runs twice under one nonce"
@@ -823,10 +818,10 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &new,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let dek_after = selection_after
             .unwrap_dek(&new, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unwrap failed: {error}"));
+            .map_err(|error| format!("unwrap failed: {error}"))?;
         assert_eq!(
             &*dek_before, &*dek_after,
             "the data key is unchanged: rotation is not re-keying"
@@ -834,43 +829,37 @@ pub(crate) mod tests {
         assert_eq!(
             selection_after
                 .unlock(&new, &PanickingKdf)
-                .unwrap_or_else(|error| panic!("unlock failed: {error}"))
+                .map_err(|error| format!("unlock failed: {error}"))?
                 .as_slice(),
             PLAINTEXT,
             "and the payload still opens under the same key"
         );
+        Ok(())
     }
 
     /// A raw-key rotation draws a fresh wrap nonce for the slot it rotates, while
     /// every slot it does not touch keeps its bytes.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotated_raw_key_slot_gets_a_fresh_wrap_nonce() {
+    fn rotated_raw_key_slot_gets_a_fresh_wrap_nonce() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let before =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let rotated = rewrap_slot(
             &blob,
             &SlotCredential::RawKey(&RAW_KEY),
             SlotSelector::Label("pod"),
             &raw_recipient_with(2, "pod", &OTHER_KEY),
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let after =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        let before_pod = before
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
-        let after_pod = after
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
+        let before_pod = before.slots.get(1).ok_or("the pod slot exists")?;
+        let after_pod = after.slots.get(1).ok_or("the pod slot exists")?;
         assert_ne!(
             before_pod.wrap_nonce, after_pod.wrap_nonce,
             "the rotated slot's wrap nonce must be freshly drawn"
@@ -879,14 +868,8 @@ pub(crate) mod tests {
             before_pod.wrapped_dek, after_pod.wrapped_dek,
             "and its wrapped DEK is the replacement credential's"
         );
-        let before_operator = before
-            .slots
-            .first()
-            .unwrap_or_else(|| panic!("the operator slot exists"));
-        let after_operator = after
-            .slots
-            .first()
-            .unwrap_or_else(|| panic!("the operator slot exists"));
+        let before_operator = before.slots.first().ok_or("the operator slot exists")?;
+        let after_operator = after.slots.first().ok_or("the operator slot exists")?;
         assert_eq!(
             before_operator.wrap_prefix, after_operator.wrap_prefix,
             "the operator slot's prefix is byte-identical"
@@ -895,6 +878,7 @@ pub(crate) mod tests {
             before_operator.wrapped_dek, after_operator.wrapped_dek,
             "and so is its wrapped DEK"
         );
+        Ok(())
     }
 
     /// A passphrase rotation draws a fresh salt as well as a fresh wrap nonce,
@@ -902,15 +886,15 @@ pub(crate) mod tests {
     /// credential, not the KDF.
     #[test]
     #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce() {
+    fn rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let before =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let rotated = rewrap_slot(
             &blob,
             &SlotCredential::Passphrase(PASSPHRASE),
@@ -921,9 +905,9 @@ pub(crate) mod tests {
                 credential: SlotCredential::Passphrase(b"a different passphrase"),
             },
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let after =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
         let block_of = |envelope: &KeytabEnvelope<'_>| -> [u8; KDF_BLOCK_LEN] {
             envelope
                 .slots
@@ -948,33 +932,27 @@ pub(crate) mod tests {
             after_block.get(KDF_SALT_END..),
             "and the parameters after it are the file's own"
         );
-        let before_slot = before
-            .slots
-            .first()
-            .unwrap_or_else(|| panic!("the slot exists"));
-        let after_slot = after
-            .slots
-            .first()
-            .unwrap_or_else(|| panic!("the slot exists"));
+        let before_slot = before.slots.first().ok_or("the slot exists")?;
+        let after_slot = after.slots.first().ok_or("the slot exists")?;
         assert_ne!(
             before_slot.wrap_nonce, after_slot.wrap_nonce,
             "and the wrap nonce is freshly drawn too"
         );
+        Ok(())
     }
 
     /// Seal plus five rotations, and no payload nonce is ever reused - which is
     /// the property, not a proxy for it.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn seal_plus_five_rotations_never_reuses_a_payload_nonce() {
+    fn seal_plus_five_rotations_never_reuses_a_payload_nonce() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let mut credential = SlotCredential::RawKey(&RAW_KEY);
         let mut nonces: Vec<[u8; NONCE_LEN]> = Vec::new();
         let mut rotate_to_other = true;
         for round in 0..=ROTATIONS {
-            let envelope = KeytabEnvelope::parse(&blob)
-                .unwrap_or_else(|error| panic!("parse failed: {error}"));
+            let envelope =
+                KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
             assert!(
                 !nonces.contains(&envelope.payload_nonce),
                 "round {round} reused a payload nonce"
@@ -992,7 +970,7 @@ pub(crate) mod tests {
                 SlotSelector::Index(0),
                 &raw_recipient_with(1, "operator", replacement),
             )
-            .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+            .map_err(|error| format!("rewrap failed: {error}"))?;
             credential = SlotCredential::RawKey(replacement);
         }
         assert_eq!(
@@ -1000,6 +978,7 @@ pub(crate) mod tests {
             ROTATIONS + 1,
             "the seal and five rotations are all counted"
         );
+        Ok(())
     }
 
     /// Seal plus five rotations, and no `(key, nonce)` pair repeats - across the
@@ -1010,28 +989,24 @@ pub(crate) mod tests {
     /// with. A rotation that reused either nonce would repeat a pair here, which
     /// is the AEAD property the format depends on.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn seal_plus_five_rotations_never_reuses_a_key_nonce_pair() {
+    fn seal_plus_five_rotations_never_reuses_a_key_nonce_pair() -> TestResult {
         let mut blob = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let mut key = &RAW_KEY;
         let mut payload_pairs: Vec<([u8; DEK_LEN], [u8; NONCE_LEN])> = Vec::new();
         let mut wrap_pairs: Vec<([u8; KEK_LEN], [u8; NONCE_LEN])> = Vec::new();
         let mut rotate_to_other = true;
         for round in 0..=ROTATIONS {
-            let envelope = KeytabEnvelope::parse(&blob)
-                .unwrap_or_else(|error| panic!("parse failed: {error}"));
+            let envelope =
+                KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
             let credential = SlotCredential::RawKey(key);
             let selection = envelope
                 .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-                .unwrap_or_else(|error| panic!("select failed: {error}"));
+                .map_err(|error| format!("select failed: {error}"))?;
             let dek = selection
                 .unwrap_dek(&credential, &PanickingKdf)
-                .unwrap_or_else(|error| panic!("unwrap failed: {error}"));
-            let slot = envelope
-                .slots
-                .first()
-                .unwrap_or_else(|| panic!("the slot exists"));
+                .map_err(|error| format!("unwrap failed: {error}"))?;
+            let slot = envelope.slots.first().ok_or("the slot exists")?;
             let payload_pair = (*dek, envelope.payload_nonce);
             let wrap_pair = (*key, slot.wrap_nonce);
             assert!(
@@ -1056,22 +1031,22 @@ pub(crate) mod tests {
                 SlotSelector::Index(0),
                 &raw_recipient_with(1, "operator", next),
             )
-            .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+            .map_err(|error| format!("rewrap failed: {error}"))?;
             key = next;
         }
         assert!(
             !payload_pairs.iter().any(|pair| wrap_pairs.contains(pair)),
             "no (key, nonce) pair may be used for both a payload and a wrap"
         );
+        Ok(())
     }
 
     /// KRP-93: a replacement of another kind is a reseal, not a rotation, and is
     /// reported as caller error rather than as corruption.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_kind_mismatch_with_rotation_mismatch() {
+    fn rotation_refuses_kind_mismatch_with_rotation_mismatch() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(6, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1084,13 +1059,18 @@ pub(crate) mod tests {
             ),
             "a kind change is a reseal, and a reseal is not a rotation"
         );
+        Ok(())
     }
 
     /// The writer applies the reader's slot-token rules: two recipients sharing
     /// an id are refused before any wrap is produced, so `seal` cannot emit a
     /// file `KeytabEnvelope::parse` would refuse.
     #[test]
-    fn seal_refuses_duplicate_recipient_ids() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_duplicate_recipient_ids keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_duplicate_recipient_ids() -> TestResult {
         assert!(
             matches!(
                 seal(
@@ -1102,12 +1082,17 @@ pub(crate) mod tests {
             ),
             "two recipients sharing an id must be refused by the writer"
         );
+        Ok(())
     }
 
     /// Two recipients sharing a label are refused by the writer too, for the
     /// same reason: the reader refuses the file, so no writer may produce it.
     #[test]
-    fn seal_refuses_duplicate_recipient_labels() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_duplicate_recipient_labels keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_duplicate_recipient_labels() -> TestResult {
         assert!(
             matches!(
                 seal(
@@ -1119,12 +1104,17 @@ pub(crate) mod tests {
             ),
             "two recipients sharing a label must be refused by the writer"
         );
+        Ok(())
     }
 
     /// A recipient label spelled like another recipient's decimal id is refused
     /// by the writer, exactly as the reader refuses the file.
     #[test]
-    fn seal_refuses_a_label_spelled_like_another_recipients_id() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_a_label_spelled_like_another_recipients_id keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_a_label_spelled_like_another_recipients_id() -> TestResult {
         assert!(
             matches!(
                 seal(
@@ -1136,12 +1126,17 @@ pub(crate) mod tests {
             ),
             "a label spelled like another recipient's id must be refused by the writer"
         );
+        Ok(())
     }
 
     /// A recipient label spelled like its *own* decimal id is refused by the
     /// writer: even a single-slot file would carry two spellings of one token.
     #[test]
-    fn seal_refuses_a_label_spelled_like_its_own_id() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_a_label_spelled_like_its_own_id keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_a_label_spelled_like_its_own_id() -> TestResult {
         assert!(
             matches!(
                 seal(PLAINTEXT, &[raw_recipient(7, "7")], &Kdf::default()),
@@ -1149,12 +1144,17 @@ pub(crate) mod tests {
             ),
             "a label spelled like its own id must be refused by the writer"
         );
+        Ok(())
     }
 
     /// A label carrying a character that cannot be rendered is refused: the
     /// reader refuses such a label, and the diagnostics render labels verbatim.
     #[test]
-    fn seal_refuses_an_unrenderable_label() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_an_unrenderable_label keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_an_unrenderable_label() -> TestResult {
         for label in [
             "a\u{1b}b",
             "a\u{202e}b",
@@ -1170,43 +1170,48 @@ pub(crate) mod tests {
                 "a label carrying an unrenderable character must be refused by the writer"
             );
         }
+        Ok(())
     }
 
     /// Zero-width joiners and spaces stay legal: real scripts and emoji
     /// sequences use them, and they neither forge nor reorder a line.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn seal_accepts_format_characters_that_cannot_forge_a_line() {
+    fn seal_accepts_format_characters_that_cannot_forge_a_line() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "a\u{200d}b\u{200b}c")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             KeytabEnvelope::parse(&blob).is_ok(),
             "a joiner is not a character that can forge or reorder a line"
         );
+        Ok(())
     }
 
     /// The writer and the reader agree on the canonical spelling rule: `"07"`
     /// is not the decimal spelling of id 7, so both sides accept it.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn seal_accepts_a_non_canonical_numeric_label() {
+    fn seal_accepts_a_non_canonical_numeric_label() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(7, "07")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             KeytabEnvelope::parse(&blob).is_ok(),
             "the reader accepts the same label shape, so the writer must too"
         );
+        Ok(())
     }
 
     /// `seal` refuses a plaintext over the reader's payload cap: a successful
     /// seal must always parse, and the cap is the reader's own rule
     /// (`KeytabEnvelope::parse` rejects `payload_len > MAX_PAYLOAD_LEN`).
     #[test]
-    fn seal_refuses_a_payload_over_the_cap() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/seal.rs::seal_refuses_a_payload_over_the_cap keeps the uniform test signature while it only asserts"
+    )]
+    fn seal_refuses_a_payload_over_the_cap() -> TestResult {
         let plaintext = vec![0x41; MAX_PAYLOAD_LEN.saturating_add(1)];
         assert!(
             matches!(
@@ -1215,6 +1220,7 @@ pub(crate) mod tests {
             ),
             "a plaintext over the cap must be refused by the writer"
         );
+        Ok(())
     }
 
     /// A rotation honours a caller-supplied band, exactly as an unlock does: an
@@ -1222,18 +1228,17 @@ pub(crate) mod tests {
     /// band and rotates under one that admits them, and the rotated slot still
     /// opens with its replacement.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_honours_a_caller_supplied_band() {
+    fn rotation_honours_a_caller_supplied_band() -> TestResult {
         // 16 MiB, t=1, p=1: at or above the crate's floor, and far below what
         // the default band admits, so only a caller band can carry it.
         let params = Argon2idParams::new(0x4000, 1, 1)
-            .unwrap_or_else(|error| panic!("the fixture parameters must be admissible: {error}"));
+            .map_err(|error| format!("the fixture parameters must be admissible: {error}"))?;
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::Argon2id(params),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1247,7 +1252,7 @@ pub(crate) mod tests {
             "the default band refuses a file sealed with another parameter set"
         );
         let limits = KdfLimits::between(params, params)
-            .unwrap_or_else(|error| panic!("one parameter set is a valid band: {error}"));
+            .map_err(|error| format!("one parameter set is a valid band: {error}"))?;
         let replacement = SlotCredential::Passphrase(b"a different passphrase");
         let rotated = rewrap_slot_with_limits(
             &blob,
@@ -1263,34 +1268,34 @@ pub(crate) mod tests {
             ),
             limits,
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let parsed =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
         let selection = parsed
             .select_slot(SlotSelector::Label("rotated!"), &limits, &replacement)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let opened = selection
             .unlock(&replacement, &Argon2Kdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(
             opened.as_slice(),
             PLAINTEXT,
             "the rotated slot opens with its replacement under the same band"
         );
+        Ok(())
     }
 
     /// A rotation rewrites a file that is already valid, so a replacement label
     /// duplicating another slot's label is refused - the result is the reader's
     /// next input.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_a_replacement_label_duplicating_another_slot() {
+    fn rotation_refuses_a_replacement_label_duplicating_another_slot() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "aaaa"), raw_recipient(2, "bbbb")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1303,18 +1308,18 @@ pub(crate) mod tests {
             ),
             "a replacement label duplicating another slot must be refused"
         );
+        Ok(())
     }
 
     /// A replacement label spelled like another slot's decimal id is refused.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_a_replacement_label_spelled_like_another_slots_id() {
+    fn rotation_refuses_a_replacement_label_spelled_like_another_slots_id() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "x"), raw_recipient(2, "y")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1327,15 +1332,15 @@ pub(crate) mod tests {
             ),
             "a replacement label spelled like another slot's id must be refused"
         );
+        Ok(())
     }
 
     /// A replacement label spelled like the rotated slot's own decimal id is
     /// refused.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_a_replacement_label_spelled_like_its_own_id() {
+    fn rotation_refuses_a_replacement_label_spelled_like_its_own_id() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(3, "x")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1348,6 +1353,7 @@ pub(crate) mod tests {
             ),
             "a replacement label spelled like the slot's own id must be refused"
         );
+        Ok(())
     }
 
     /// A replacement label carrying a character that cannot be rendered is
@@ -1355,11 +1361,10 @@ pub(crate) mod tests {
     /// replacement keeps the replaced label's byte length, so only the value can
     /// be the refusal.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_an_unrenderable_replacement_label() {
+    fn rotation_refuses_an_unrenderable_replacement_label() -> TestResult {
         for (label, replacement) in [("x", "\u{1b}"), ("abc", "\u{202e}"), ("abc", "\u{2028}")] {
             let blob = seal(PLAINTEXT, &[raw_recipient(1, label)], &Kdf::default())
-                .unwrap_or_else(|error| panic!("seal failed: {error}"));
+                .map_err(|error| format!("seal failed: {error}"))?;
             assert!(
                 matches!(
                     rewrap_slot(
@@ -1373,29 +1378,29 @@ pub(crate) mod tests {
                 "a replacement label carrying an unrenderable character must be refused"
             );
         }
+        Ok(())
     }
 
     /// A relabel that collides with nothing still rotates, and the result
     /// parses and opens under the replacement credential: the gate refuses
     /// collisions, not relabelling.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_accepts_a_non_colliding_relabel() {
+    fn rotation_accepts_a_non_colliding_relabel() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "x"), raw_recipient(2, "y")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let rotated = rewrap_slot(
             &blob,
             &SlotCredential::RawKey(&RAW_KEY),
             SlotSelector::Label("x"),
             &raw_recipient_with(1, "z", &OTHER_KEY),
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
         let parsed =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
         let replacement = SlotCredential::RawKey(&OTHER_KEY);
         let selection = parsed
             .select_slot(
@@ -1403,25 +1408,25 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &replacement,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let opened = selection
             .unlock(&replacement, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(
             opened.as_slice(),
             PLAINTEXT,
             "the relabelled slot opens with its replacement credential"
         );
+        Ok(())
     }
 
     /// A label of a different byte length is a reseal: the file's shape would
     /// change, so the slots the rotation does not touch could not stay where they
     /// are.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn rotation_refuses_label_length_mismatch_with_rotation_mismatch() {
+    fn rotation_refuses_label_length_mismatch_with_rotation_mismatch() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         assert!(
             matches!(
                 rewrap_slot(
@@ -1434,6 +1439,7 @@ pub(crate) mod tests {
             ),
             "a label of another length is a reseal, not a rotation"
         );
+        Ok(())
     }
 
     /// **D4: the file authenticates in full before `RotationMismatch` is
@@ -1451,8 +1457,7 @@ pub(crate) mod tests {
     /// and answered for the whole file; the unlock decides now, and its verdict
     /// is the authentication failure.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn a_tampered_envelope_is_refused_before_rotation_mismatch() {
+    fn a_tampered_envelope_is_refused_before_rotation_mismatch() -> TestResult {
         // The fixture's offsets: the fixed header is 70 bytes, and the slot is
         // `slot_id` (4) `slot_type` (1) `slot_label_len` (1) "operator" (8)
         // `kek_alg` (1), then the KDF block, `wrap_alg`, the nonce and the wrap.
@@ -1465,9 +1470,9 @@ pub(crate) mod tests {
             &[passphrase_recipient(7, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let header_len = KeytabEnvelope::parse(&sealed)
-            .unwrap_or_else(|error| panic!("the sealed file must parse: {error}"))
+            .map_err(|error| format!("the sealed file must parse: {error}"))?
             .header
             .len();
         let mut tampered = sealed;
@@ -1483,7 +1488,7 @@ pub(crate) mod tests {
             field.copy_from_slice(&shortened.to_le_bytes());
         }
         let parsed = KeytabEnvelope::parse(&tampered)
-            .unwrap_or_else(|error| panic!("the tampered file still parses: {error}"));
+            .map_err(|error| format!("the tampered file still parses: {error}"))?;
         assert_eq!(
             parsed.slots.first().map(|slot| slot.kind),
             Some(SlotType::RawKey),
@@ -1502,22 +1507,22 @@ pub(crate) mod tests {
             matches!(refused, Err(EnvelopeError::AuthenticationFailed)),
             "a tampered header is an authentication failure, not a rotation mismatch: {refused:?}"
         );
+        Ok(())
     }
 
     /// KRP-88: the seal path never derives, for a raw-key recipient - the
     /// backend that panics is not reached, on sealing or on the unlock that
     /// follows it.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn a_raw_key_recipient_never_reaches_argon2_on_the_seal_path() {
+    fn a_raw_key_recipient_never_reaches_argon2_on_the_seal_path() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient_with(5, "pod", &OTHER_KEY)],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&OTHER_KEY);
         let plaintext = envelope
             .select_slot(
@@ -1525,10 +1530,11 @@ pub(crate) mod tests {
                 &KdfLimits::defaults(),
                 &credential,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"))
+            .map_err(|error| format!("select failed: {error}"))?
             .unlock(&credential, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(plaintext.as_slice(), PLAINTEXT);
+        Ok(())
     }
 
     /// SOW §4/A6: `seal` takes the caller's KDF **by reference**, and so does
@@ -1536,18 +1542,17 @@ pub(crate) mod tests {
     /// what the row fixed - a test can only show the value it happened to pass -
     /// and because a second, by-value overload is exactly what the row forbids.
     #[test]
-    #[expect(clippy::panic, reason = "the guard must find the functions it pins")]
-    fn seal_takes_kdf_by_reference() {
+    fn seal_takes_kdf_by_reference() -> TestResult {
         let source = include_str!("seal.rs");
         let production = production_text(source);
         for function in ["pub fn seal(", "fn seal_with("] {
             let start = production
                 .find(function)
-                .unwrap_or_else(|| panic!("{function} must still exist"));
+                .ok_or_else(|| format!("{function} must still exist"))?;
             let parameters = production
                 .get(start..)
                 .and_then(|rest| rest.get(..rest.find('{')?))
-                .unwrap_or_else(|| panic!("{function}'s signature must close"));
+                .ok_or_else(|| format!("{function}'s signature must close"))?;
             assert!(
                 parameters.contains("kdf: &Kdf"),
                 "{function} must take the caller's KDF by reference: {parameters}"
@@ -1557,5 +1562,6 @@ pub(crate) mod tests {
             !production.contains("kdf: Kdf"),
             "no by-value overload of the KDF may survive (SOW section 4, KRP-88)"
         );
+        Ok(())
     }
 }
