@@ -144,6 +144,7 @@ job_lint_gates() {
     bash -c 'for s in scripts/lint-ratchet/*.py; do python3 -B "$s" --self-test || exit 1; done'
   run "vendored guideline checksum" bash -c 'cd docs/rust-guidelines && sha256sum -c SHA256SUMS'
   run "allow gate" python3 -B scripts/lint-ratchet/allow_gate.py --enforce
+  run "catalog gate" python3 -B scripts/lint-ratchet/catalog_gate.py
   run "profile equality" python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
   run "dash gate" python3 -B scripts/lint-ratchet/dash_gate.py --enforce
   run "prose gates" python3 -B scripts/lint-ratchet/prose_gates.py --enforce

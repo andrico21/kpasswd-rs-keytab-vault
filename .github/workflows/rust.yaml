@@ -281,6 +281,8 @@ jobs:
         run: (cd docs/rust-guidelines && sha256sum -c SHA256SUMS)
       - name: Allow gate (no allow attribute of any form)
         run: python3 -B scripts/lint-ratchet/allow_gate.py --enforce
+      - name: Catalog gate (every expect reason is catalogued)
+        run: python3 -B scripts/lint-ratchet/catalog_gate.py
       - name: Profile equality (Cargo.toml and clippy.toml against the vendored core)
         run: python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
       - name: Dash gate
