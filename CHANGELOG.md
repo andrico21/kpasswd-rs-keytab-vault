@@ -6,6 +6,13 @@ All notable changes to this crate are documented here. The format follows [Keep 
 
 - Nothing yet.
 
+## [0.2.1] - 2026-10-23
+
+### Changed
+
+- Dependency refresh: the lockfile moves `ctutils`, which `digest` pulls in, from 0.4.3 to 0.4.5. The manifest's dependency requirements are unchanged, and so are the API and the envelope format.
+- The 0.2.0 entry's recovery route for envelopes whose labels 0.2.0 refuses no longer assumes cargo can resolve 0.1.0: it is yanked, so the entry now gives the `.crate` download URL and its SHA-256, to unpack and depend on by `path`.
+
 ## [0.2.0] - 2026-10-23
 
 ### Added
