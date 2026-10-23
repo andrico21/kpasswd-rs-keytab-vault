@@ -353,10 +353,12 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::too_long_first_doc_paragraph,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     use super::*;
     use crate::{seal::argon2_block_from_salt, test_support::*, *};
@@ -439,17 +441,13 @@ mod tests {
     /// those values are checked, so a loosened comparison would accept a file
     /// sealed under parameters the caller did not allow.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn argon2_parameter_fields_outside_the_band_are_rejected() {
+    fn argon2_parameter_fields_outside_the_band_are_rejected() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         // The single passphrase slot's KDF block starts at byte 85: the
         // 70-byte header, then slot_id (4), slot_type (1), slot_label_len
         // (1), the 8-byte label, and kek_alg (1). Each parameter sits at a
@@ -474,11 +472,11 @@ mod tests {
                 *byte ^= 0x11;
             }
             let envelope = KeytabEnvelope::parse(&corrupted)
-                .unwrap_or_else(|error| panic!("parse failed: {error}"));
+                .map_err(|error| format!("parse failed: {error}"))?;
             let credential = SlotCredential::Passphrase(PASSPHRASE);
             let selected = envelope
                 .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-                .unwrap_or_else(|error| panic!("select failed: {error}"));
+                .map_err(|error| format!("select failed: {error}"))?;
             assert!(
                 matches!(
                     selected.unlock(&credential, &Argon2Kdf),
@@ -487,16 +485,13 @@ mod tests {
                 "a slot whose {name} is not the v1 value must be rejected"
             );
         }
+        Ok(())
     }
 
     /// A raw-key unlock never reaches the KDF backend, and never validates
     /// another slot's Argon2 parameters.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn raw_key_path_performs_no_argon2_derivation() {
+    fn raw_key_path_performs_no_argon2_derivation() -> TestResult {
         // Two slots: the passphrase slot is *not* selected, and its
         // parameters are never inspected.
         let blob = seal(
@@ -504,9 +499,9 @@ mod tests {
             &[passphrase_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         let selected = envelope
             .select_slot(
@@ -514,11 +509,12 @@ mod tests {
                 &KdfLimits::defaults(),
                 &credential,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let plaintext = selected
             .unlock(&credential, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unlock failed: {error}"));
+            .map_err(|error| format!("unlock failed: {error}"))?;
         assert_eq!(plaintext.as_slice(), PLAINTEXT);
+        Ok(())
     }
 
     /// No Argon2 *derivation* outside the concrete backend: the injected
@@ -531,24 +527,17 @@ mod tests {
     /// parameter decoding, not derivation, and belongs with the block
     /// readers; what must not move is the derivation itself.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "the source file must be readable for the guard to mean anything"
-    )]
-    fn argon2_use_is_confined_to_the_backend() {
+    fn argon2_use_is_confined_to_the_backend() -> TestResult {
         use std::fs::read_to_string;
         let source = read_to_string(format!("{}/src/kdf.rs", env!("CARGO_MANIFEST_DIR")))
-            .unwrap_or_else(|error| panic!("the module source must be readable: {error}"));
+            .map_err(|error| format!("the module source must be readable: {error}"))?;
         let production = production_text(&source);
         let impl_start = production
             .find("impl KdfBackend for Argon2Kdf")
-            .unwrap_or_else(|| panic!("the concrete backend must exist"));
+            .ok_or("the concrete backend must exist")?;
         let after = production.split_at(impl_start).1;
-        let impl_offset = impl_start.saturating_add(
-            after
-                .find("\n}\n")
-                .unwrap_or_else(|| panic!("the backend impl must close")),
-        );
+        let impl_offset =
+            impl_start.saturating_add(after.find("\n}\n").ok_or("the backend impl must close")?);
         // Compare line indices: the byte offsets above cannot be compared to
         // the enumerate index directly.
         let impl_first_line = production.split_at(impl_start).0.lines().count();
@@ -568,6 +557,7 @@ mod tests {
                 line_number.saturating_add(1)
             );
         }
+        Ok(())
     }
 
     /// KRP-90/A6: the default seal and an explicit `Argon2idParams::defaults()`
@@ -579,22 +569,21 @@ mod tests {
     /// what this pins is the *block*, which is what the golden vectors carry
     /// byte for byte.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn default_kdf_writes_default_argon2id_parameters() {
+    fn default_kdf_writes_default_argon2id_parameters() -> TestResult {
         let by_default = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let by_hand = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::Argon2id(Argon2idParams::defaults()),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let expected = argon2_block_from_salt(&[0; SALT_LEN], Argon2idParams::defaults())
-            .unwrap_or_else(|error| panic!("the canonical block must build: {error}"));
+            .map_err(|error| format!("the canonical block must build: {error}"))?;
         assert_eq!(
             block_without_salt(&by_default),
             expected,
@@ -605,6 +594,7 @@ mod tests {
             expected,
             "and an explicit Argon2idParams::defaults() writes the same one"
         );
+        Ok(())
     }
 
     /// KRP-93: a non-default parameter set stays in the format's one version,
@@ -615,31 +605,30 @@ mod tests {
     /// is no v2 to write a variable parameter set as, and no version for a reader
     /// to agree or disagree about.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn non_default_parameters_stay_in_the_single_format_and_round_trip() {
+    fn non_default_parameters_stay_in_the_single_format_and_round_trip() -> TestResult {
         let stronger = Argon2idParams::new(Argon2idParams::floor().memory_kib(), 2, 2)
-            .unwrap_or_else(|error| panic!("a stronger set must be accepted: {error}"));
+            .map_err(|error| format!("a stronger set must be accepted: {error}"))?;
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::Argon2id(stronger),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert_eq!(
             version_of(&blob),
             format::FORMAT_VERSION,
             "one format writes the format's version for every parameter set"
         );
         let envelope = KeytabEnvelope::parse(&blob)
-            .unwrap_or_else(|error| panic!("the file must parse: {error}"));
+            .map_err(|error| format!("the file must parse: {error}"))?;
         let credential = SlotCredential::Passphrase(b"correct horse battery staple");
         // The caller's band decides: the default one does not admit the file's
         // parameters, so this needs a band that does.
         let limits = KdfLimits::between(Argon2idParams::floor(), stronger)
-            .unwrap_or_else(|error| panic!("a valid band: {error}"));
+            .map_err(|error| format!("a valid band: {error}"))?;
         let selection = envelope
             .select_slot(SlotSelector::Label("operator"), &limits, &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         assert!(
             selection.unlock(&credential, &Argon2Kdf).is_ok(),
             "the file opens with a band that admits its parameters"
@@ -651,7 +640,7 @@ mod tests {
                 &KdfLimits::defaults(),
                 &credential,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         assert!(
             matches!(
                 narrowed.unlock(&credential, &Argon2Kdf),
@@ -659,12 +648,17 @@ mod tests {
             ),
             "a band of exactly the default parameters refuses the file's stronger set"
         );
+        Ok(())
     }
 
     /// The floor half of the band: weakening must be deliberate, so the
     /// constructor refuses parameters below it.
     #[test]
-    fn parameters_below_the_floor_are_refused() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/kdf.rs::parameters_below_the_floor_are_refused keeps the uniform test signature while it only asserts"
+    )]
+    fn parameters_below_the_floor_are_refused() -> TestResult {
         let floor = Argon2idParams::floor();
         assert!(
             Argon2idParams::new(floor.memory_kib(), floor.iterations(), floor.parallelism())
@@ -684,16 +678,15 @@ mod tests {
             Argon2idParams::new(floor.memory_kib(), 0, floor.parallelism()).is_err(),
             "zero iterations is refused"
         );
+        Ok(())
     }
 
     /// A band whose minimum is above its maximum is not a band.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn an_inverted_band_is_refused() {
-        let low =
-            Argon2idParams::new(8_192, 1, 1).unwrap_or_else(|error| panic!("fixture: {error}"));
+    fn an_inverted_band_is_refused() -> TestResult {
+        let low = Argon2idParams::new(8_192, 1, 1).map_err(|error| format!("fixture: {error}"))?;
         let high =
-            Argon2idParams::new(0x1_0000, 3, 4).unwrap_or_else(|error| panic!("fixture: {error}"));
+            Argon2idParams::new(0x1_0000, 3, 4).map_err(|error| format!("fixture: {error}"))?;
         assert!(
             KdfLimits::between(low, high).is_ok(),
             "a real band is accepted"
@@ -706,6 +699,7 @@ mod tests {
             KdfLimits::between(Argon2idParams::floor(), Argon2idParams::defaults()).is_ok(),
             "the floor may be the minimum: that is what a floor is for"
         );
+        Ok(())
     }
 
     /// KRP-90/A6: the default band accepts exactly the format's parameters and
@@ -714,7 +708,11 @@ mod tests {
     /// Replaces `the_scaffold_is_band_shaped`, whose subject was the old `v1()`
     /// name for the same rule.
     #[test]
-    fn default_kdf_limits_accept_only_the_default_parameters() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/kdf.rs::default_kdf_limits_accept_only_the_default_parameters keeps the uniform test signature while it only asserts"
+    )]
+    fn default_kdf_limits_accept_only_the_default_parameters() -> TestResult {
         let limits = KdfLimits::defaults();
         assert!(
             limits.admits(Argon2idParams::defaults()),
@@ -743,6 +741,7 @@ mod tests {
                 && KdfLimits::between(weaker, stronger).is_ok_and(|band| !band.is_defaults()),
             "`is_defaults` reports exactly the exact band, and a real band is not it"
         );
+        Ok(())
     }
 
     /// SOW B6c/KRP-93: a block outside the caller's band is refused before a
@@ -754,20 +753,19 @@ mod tests {
     /// ran. The refusal is in the envelope rather than in the backend, so it
     /// holds for whatever backend a caller injects.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn out_of_band_parameters_are_refused_before_derivation() {
+    fn out_of_band_parameters_are_refused_before_derivation() -> TestResult {
         let credential = SlotCredential::Passphrase(b"correct horse battery staple");
         for memory_kib in [BELOW_FLOOR_KIB, ABOVE_CEILING_KIB] {
             let blob = sealed_declaring_memory(memory_kib);
             let envelope = KeytabEnvelope::parse(&blob)
-                .unwrap_or_else(|error| panic!("the corrupted file still parses: {error}"));
+                .map_err(|error| format!("the corrupted file still parses: {error}"))?;
             let selection = envelope
                 .select_slot(
                     SlotSelector::Label("operator"),
                     &KdfLimits::defaults(),
                     &credential,
                 )
-                .unwrap_or_else(|error| panic!("select failed: {error}"));
+                .map_err(|error| format!("select failed: {error}"))?;
             assert!(
                 matches!(
                     selection.unlock(&credential, &PanickingKdf),
@@ -776,6 +774,7 @@ mod tests {
                 "a block declaring {memory_kib} KiB is refused before the backend is reached"
             );
         }
+        Ok(())
     }
 
     /// KRP-90/SOW B6c: the docs name both RFC 9106 section 4 recommended sets
@@ -785,7 +784,11 @@ mod tests {
     /// SECOND set is what the default names, the FIRST set is prose, and the
     /// absence of a constructor is what "no FIRST preset" means.
     #[test]
-    fn kdf_docs_name_rfc_9106_defaults_without_a_first_preset() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/kdf.rs::kdf_docs_name_rfc_9106_defaults_without_a_first_preset keeps the uniform test signature while it only asserts"
+    )]
+    fn kdf_docs_name_rfc_9106_defaults_without_a_first_preset() -> TestResult {
         let source = include_str!("lib.rs");
         let production = production_text(source);
         for named in [
@@ -811,5 +814,6 @@ mod tests {
                 "no FIRST RECOMMENDED preset may exist, yet the sources name {forbidden}"
             );
         }
+        Ok(())
     }
 }
