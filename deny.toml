@@ -1,6 +1,6 @@
 # The universal guidelines' deny.toml (core section 10, rust-guidelines tag
 # rust-1.99-r3), in the sample's order. This crate's deltas are the license
-# allowlist, `private`, and the `[bans] skip` list, each with its reason.
+# allowlist and the `[bans] skip` list, each with its reason.
 # Adapted from the source workspace's file when the vault split out (S1); the
 # entries it carried for `ring`/`hickory`/`vendor` do not apply here - this
 # crate's tree is registry-only.
@@ -24,9 +24,6 @@ yanked = "deny"
 
 [licenses]
 confidence-threshold = 0.93
-# Crates without a license field are ignored only when they are unpublished;
-# this crate itself declares `MIT OR Apache-2.0`.
-private = { ignore = true }
 # Only licenses a dependency actually needs. An `A OR B` expression is
 # satisfied by either side, so licenses that appear only as the other side of
 # an OR with MIT are not listed.
@@ -48,18 +45,15 @@ wildcards = "deny"
 allow-wildcard-paths = false
 highlight = "all"
 skip = [
-  # rskrb5-patched (the published fork) requires `getrandom = "0.3"`; 0.4 is
-  # this crate's own.
-  { name = "getrandom", version = "0.3.4" },
-  # r-efi 5 sits under getrandom 0.3, r-efi 6 under getrandom 0.4 (UEFI only).
-  { name = "r-efi", version = "5.3.0" },
-  # syn 2 under rasn-derive/snafu-derive/zeroize_derive, 3 under
-  # async-trait and displaydoc.
-  { name = "syn", version = "3.0.6" },
+  { name = "getrandom", version = "=0.3.4", reason = "rskrb5-patched (the published fork) requires getrandom 0.3; 0.4 is this crate's own" },
+  { name = "r-efi", version = "=5.3.0", reason = "r-efi 5 sits under getrandom 0.3, r-efi 6 under getrandom 0.4 (UEFI only)" },
+  { name = "syn", version = "=3.0.9", reason = "syn 2 under rasn-derive, snafu-derive and zeroize_derive; 3 under async-trait and displaydoc" },
 ]
 
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+required-git-spec = "rev"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # This repository is registry-only; no git sources are allowed at all.
 allow-git = []
