@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/prose_gates.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
 # Local deltas: `_doc_block` walks multi-line attributes (rmcp's stopped at their continuation lines).
-#!/usr/bin/env python3
 """Prose-rule gates (D-12).
 
 Five independent checks, each with a ``--only <name>`` selector:

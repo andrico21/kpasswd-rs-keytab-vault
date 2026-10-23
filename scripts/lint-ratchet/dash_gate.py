@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/dash_gate.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
 # Local deltas: none.
-#!/usr/bin/env python3
 """Gate the repository's single-hyphen dash convention.
 
 Reports prose, banner, string, arrow and Unicode dash forms in tracked text
@@ -10,7 +10,6 @@ Mermaid arrows, generated anchor syntax, Markdown rules and table separators
 are exempt. ``--enforce`` exits nonzero when a violation exists; ``--self-test``
 runs inline fixtures.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -210,7 +209,7 @@ def command_usage_prefix(line: str) -> tuple[str, int]:
     for marker in ("//!", "///", "//", "#"):
         if stripped.startswith(marker):
             offset += len(marker)
-            stripped = stripped[len(marker) :]
+            stripped = stripped[len(marker):]
             spaces = len(stripped) - len(stripped.lstrip())
             offset += spaces
             stripped = stripped[spaces:]
@@ -229,7 +228,7 @@ def command_usage_prefix(line: str) -> tuple[str, int]:
         stripped = stripped[spaces:]
     if stripped.startswith("run:"):
         offset += len("run:")
-        stripped = stripped[len("run:") :]
+        stripped = stripped[len("run:"):]
         spaces = len(stripped) - len(stripped.lstrip())
         offset += spaces
         stripped = stripped[spaces:]
@@ -254,9 +253,7 @@ def line_bounds(text: str, index: int) -> tuple[int, int]:
     return start, len(text) if end < 0 else end
 
 
-def classify_token(
-    path: Path, text: str, regions: list[str], fences: list[str], index: int
-) -> str:
+def classify_token(path: Path, text: str, regions: list[str], fences: list[str], index: int) -> str:
     start, end = line_bounds(text, index)
     line = text[start:end]
     column = index - start
@@ -288,31 +285,19 @@ def classify_token(
             return "exempt"
         next_start = end + 1
         next_end = text.find("\n", next_start)
-        next_line = text[
-            next_start : (next_end if next_end >= 0 else len(text))
-        ].lstrip()
+        next_line = text[next_start : (next_end if next_end >= 0 else len(text))].lstrip()
         if after == "\n" and next_line.startswith("-"):
             return "exempt"
     region = regions[index] if index < len(regions) else "code"
     if path.suffix == ".md" and region == "code":
-        if (
-            re.match(r"\s*(//|#)", line)
-            or " // " in line[:column]
-            or " # " in line[:column]
-        ):
+        if re.match(r"\s*(//|#)", line) or " // " in line[:column] or " # " in line[:column]:
             return "prose"
         if COMMAND_RE.search(line[:column]):
             return "exempt"
         return "prose" if before == " " and after in " \n" else "exempt"
     if region == "string":
         return "string"
-    pattern = (
-        r"^\s*(//[!/]?|#+)\s*"
-        + re.escape(DOUBLE_DASH)
-        + r"\s.*\S\s"
-        + re.escape(DOUBLE_DASH)
-        + r"\s*$"
-    )
+    pattern = r"^\s*(//[!/]?|#+)\s*" + re.escape(DOUBLE_DASH) + r"\s.*\S\s" + re.escape(DOUBLE_DASH) + r"\s*$"
     if re.match(pattern, line):
         return "banner"
     return "prose"
@@ -330,24 +315,12 @@ def scan_file(path: Path) -> list[Violation]:
             continue
         start, end = line_bounds(text, match.start())
         violations.append(
-            Violation(
-                path,
-                text.count("\n", 0, match.start()) + 1,
-                match.start() - start + 1,
-                kind,
-                text[start:end].strip(),
-            )
+            Violation(path, text.count("\n", 0, match.start()) + 1, match.start() - start + 1, kind, text[start:end].strip())
         )
     for match in UNICODE_DASH_RE.finditer(text):
         start, end = line_bounds(text, match.start())
         violations.append(
-            Violation(
-                path,
-                text.count("\n", 0, match.start()) + 1,
-                match.start() - start + 1,
-                "unicode",
-                text[start:end].strip(),
-            )
+            Violation(path, text.count("\n", 0, match.start()) + 1, match.start() - start + 1, "unicode", text[start:end].strip())
         )
     return violations
 
@@ -388,48 +361,16 @@ def self_test() -> int:
         "cli.md": (f"Run `cargo clippy {dd} -D warnings` before merging.\n", 0, set()),
         "mermaid.md": (f"```mermaid\nA{dd}>>B\nB {dd}> C\n```\n", 0, set()),
         "html.md": (f"<!{dd} generated {dd}>\n", 0, set()),
-        "rule.md": (
-            "-" * 3 + "\n| a | b |\n|" + "-" * 3 + "|" + "-" * 3 + "|\n",
-            0,
-            set(),
-        ),
-        "shield.md": (
-            f"https://img.shields.io/badge/license-Apache{dd}2.0-blue.svg\n",
-            0,
-            set(),
-        ),
+        "rule.md": ("-" * 3 + "\n| a | b |\n|" + "-" * 3 + "|" + "-" * 3 + "|\n", 0, set()),
+        "shield.md": (f"https://img.shields.io/badge/license-Apache{dd}2.0-blue.svg\n", 0, set()),
         "anchor.md": (f"[old](#a{dd}b)\n", 0, set()),
-        "separator.md": (
-            f"Run `cargo run {dd} {dd}literal` to pass a separator.\n",
-            0,
-            set(),
-        ),
-        "rs_command_separator.rs": (
-            f"//! cargo run {dd}example demo {dd} ./config.toml\n",
-            0,
-            set(),
-        ),
-        "sh_command_separator.sh": (
-            f"# cargo run {dd}example demo {dd} ./config.toml\n",
-            0,
-            set(),
-        ),
-        "yaml_command_separator.yml": (
-            f"      - run: cargo run {dd}example x {dd} ./cfg.toml\n",
-            0,
-            set(),
-        ),
-        "md_fenced_command.md": (
-            f"```bash\ncargo run -p demo {dd} serve\n```\n",
-            0,
-            set(),
-        ),
+        "separator.md": (f"Run `cargo run {dd} {dd}literal` to pass a separator.\n", 0, set()),
+        "rs_command_separator.rs": (f"//! cargo run {dd}example demo {dd} ./config.toml\n", 0, set()),
+        "sh_command_separator.sh": (f"# cargo run {dd}example demo {dd} ./config.toml\n", 0, set()),
+        "yaml_command_separator.yml": (f"      - run: cargo run {dd}example x {dd} ./cfg.toml\n", 0, set()),
+        "md_fenced_command.md": (f"```bash\ncargo run -p demo {dd} serve\n```\n", 0, set()),
         "md_prose_command.md": (f"Run `cargo test` {dd} it is slow.\n", 1, {"prose"}),
-        "rs_prose_command.rs": (
-            f"//! See the cargo docs {dd} they explain it.\n",
-            1,
-            {"prose"},
-        ),
+        "rs_prose_command.rs": (f"//! See the cargo docs {dd} they explain it.\n", 1, {"prose"}),
     }
     failures: list[str] = []
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -440,9 +381,7 @@ def self_test() -> int:
             found = scan_file(path)
             kinds = {item.kind for item in found}
             if len(found) != expected_count or kinds != expected_kinds:
-                failures.append(
-                    f"{name}: got {len(found)} {sorted(kinds)}, expected {expected_count} {sorted(expected_kinds)}"
-                )
+                failures.append(f"{name}: got {len(found)} {sorted(kinds)}, expected {expected_count} {sorted(expected_kinds)}")
     if failures:
         for failure in failures:
             print(f"dash_gate self-test FAIL: {failure}")
@@ -453,24 +392,14 @@ def self_test() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--report", action="store_true", help="print violations (default)"
-    )
-    parser.add_argument(
-        "--enforce", action="store_true", help="exit 1 when violations exist"
-    )
-    parser.add_argument(
-        "--files", nargs="+", help="scan these files instead of tracked files"
-    )
+    parser.add_argument("--report", action="store_true", help="print violations (default)")
+    parser.add_argument("--enforce", action="store_true", help="exit 1 when violations exist")
+    parser.add_argument("--files", nargs="+", help="scan these files instead of tracked files")
     parser.add_argument("--self-test", action="store_true", help="run inline fixtures")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
-    paths = (
-        [Path(item).resolve() for item in args.files]
-        if args.files
-        else git_ls_files(ROOT)
-    )
+    paths = [Path(item).resolve() for item in args.files] if args.files else git_ls_files(ROOT)
     violations = scan(paths)
     print_report(violations, len(paths))
     if args.enforce and violations:

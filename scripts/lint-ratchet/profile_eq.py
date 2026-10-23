@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/profile_eq.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
 # Local deltas: reads `[workspace.lints]` when `[lints]` is exactly `workspace = true`; honors `[[clippy-only-duplicate]]` in profile-deltas.toml.
-#!/usr/bin/env python3
 """Semantic equality: the vendored core Section 9 profile vs Cargo.toml (D-13).
 
 The core profile is located by content markers (not line numbers) inside the

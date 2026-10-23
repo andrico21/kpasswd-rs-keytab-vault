@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/allow_gate.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
 # Local deltas: none.
-#!/usr/bin/env python3
 """Count ``allow`` attributes (IS-6 / N-16 vii).
 
 Strips comments and strings first, then counts ``#[allow(``, ``#![allow(`` and

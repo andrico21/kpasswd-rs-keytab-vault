@@ -1,7 +1,7 @@
+#!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/catalog_gate.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
 # Local deltas: no `lint-migration:` skip, no converted-allows whitelist, four rmcp-domain catalog entries removed.
-#!/usr/bin/env python3
 """Catalog gate (D-6''): every ``expect`` reason is catalogued.
 
 Every ``expect`` reason must match a D-6'' catalog prefix; ``deliberate:`` /
