@@ -285,6 +285,8 @@ jobs:
         run: python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
       - name: Dash gate
         run: python3 -B scripts/lint-ratchet/dash_gate.py --enforce
+      - name: Prose gates (cancel safety, test docs, tests return Result, Drop audit, emptiness messages)
+        run: python3 -B scripts/lint-ratchet/prose_gates.py --enforce
 
   build-linux:
     name: Build & Test (Linux)

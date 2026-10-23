@@ -146,6 +146,7 @@ job_lint_gates() {
   run "allow gate" python3 -B scripts/lint-ratchet/allow_gate.py --enforce
   run "profile equality" python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
   run "dash gate" python3 -B scripts/lint-ratchet/dash_gate.py --enforce
+  run "prose gates" python3 -B scripts/lint-ratchet/prose_gates.py --enforce
 }
 
 job_security() {
