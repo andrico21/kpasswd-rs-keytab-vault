@@ -885,10 +885,6 @@ pub(crate) mod tests {
     /// and keeps the parameters the file already carried: a rotation replaces the
     /// credential, not the KDF.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "deliberate: src/seal.rs::rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce a wrong-side test result must abort the test"
-    )]
     fn rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce() -> TestResult {
         let blob = seal(
             PLAINTEXT,
@@ -911,15 +907,16 @@ pub(crate) mod tests {
         .map_err(|error| format!("rewrap failed: {error}"))?;
         let after =
             KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
-        let block_of = |envelope: &KeytabEnvelope<'_>| -> [u8; KDF_BLOCK_LEN] {
-            envelope
-                .slots
-                .first()
-                .and_then(|slot| slot.kdf)
-                .unwrap_or_else(|| panic!("the passphrase slot carries a KDF block"))
-        };
-        let before_block = block_of(&before);
-        let after_block = block_of(&after);
+        let block_of =
+            |envelope: &KeytabEnvelope<'_>| -> Result<[u8; KDF_BLOCK_LEN], &'static str> {
+                envelope
+                    .slots
+                    .first()
+                    .and_then(|slot| slot.kdf)
+                    .ok_or("the passphrase slot carries a KDF block")
+            };
+        let before_block = block_of(&before)?;
+        let after_block = block_of(&after)?;
         assert_ne!(
             salt_from_block(&before_block),
             salt_from_block(&after_block),

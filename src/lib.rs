@@ -420,7 +420,7 @@ mod test_support {
         /// Opens `/proc/self/mem` and sizes the buffer for reads of `len` bytes.
         #[expect(
             clippy::panic,
-            reason = "deliberate: src/lib.rs::new a test that cannot read its own memory must fail, not pass"
+            reason = "deliberate: src/lib.rs::FreedMemory::new a test that cannot read its own memory must fail, not pass"
         )]
         pub(crate) fn new(len: usize) -> Self {
             let file = File::open("/proc/self/mem")
@@ -434,7 +434,7 @@ mod test_support {
         /// How many of the bytes at `address` still hold `marker`.
         #[expect(
             clippy::panic,
-            reason = "deliberate: src/lib.rs::residue a test that cannot read its own memory must fail, not pass"
+            reason = "deliberate: src/lib.rs::FreedMemory::residue a test that cannot read its own memory must fail, not pass"
         )]
         pub(crate) fn residue(&mut self, address: usize, marker: u8) -> usize {
             let offset = u64::try_from(address)

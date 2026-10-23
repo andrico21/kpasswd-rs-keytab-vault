@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # Ported from rmcp-server-kit scripts/lint-ratchet/common.py at
 # b7f6b66afe845e4f5b9bf2bef349f28dc8f67bb5.
-# Local deltas: `iter_rust_files` also scans `fuzz/fuzz_targets`; `_classify` reads every `cfg_attr` argument after the predicate (rmcp's read only the last one).
+# Local deltas: `iter_rust_files` also scans `fuzz/fuzz_targets`; `_classify`
+#   reads every `cfg_attr` argument after the predicate (rmcp's read only the
+#   last one).
 """Shared, stdlib-only parsers for the lint-ratchet gates.
 
 Everything here is byte-exact: :func:`strip_comments_and_strings` preserves the
