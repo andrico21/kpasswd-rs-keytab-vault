@@ -3,8 +3,8 @@
 # Best-effort local equivalent of .github/workflows/rust.yaml.
 #
 # This repository has exactly one automated gate besides GitHub Actions: this
-# script. It reproduces the `lint`, `nightly-lint`, `security`, `build-linux` and
-# `msrv` jobs at the same strictness.
+# script. It reproduces the `lint`, `nightly-lint`, `lint-gates`, `security`,
+# `build-linux` and `msrv` jobs at the same strictness.
 #
 # Not one-for-one. Two gaps, stated here because "I ran CI" should not
 # overstate what ran:
@@ -18,7 +18,7 @@
 #     advisory (section 12 classes fuzzing informational).
 #
 # Usage: scripts/ci-local.sh [job ...]
-#   Jobs: lint nightly-lint security build-linux build-windows msrv (default: all six)
+#   Jobs: lint nightly-lint lint-gates security build-linux build-windows msrv (default: all seven)
 #
 # Optional tools that CI marks `continue-on-error: true` (cargo-geiger) are
 # skipped with a notice when absent rather than failing; everything gating in
@@ -135,6 +135,19 @@ job_nightly_lint() {
     cargo +"$nightly" doc --locked --no-deps --all-features
 }
 
+job_lint_gates() {
+  section "Lint gates (lint-ratchet)"
+  # The dash gate reads the git index, as in CI: stage or commit new files first.
+  run "python3 is 3.11 or newer (tomllib)" \
+    python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+  run "gate self-tests" \
+    bash -c 'for s in scripts/lint-ratchet/*.py; do python3 -B "$s" --self-test || exit 1; done'
+  run "vendored guideline checksum" bash -c 'cd docs/rust-guidelines && sha256sum -c SHA256SUMS'
+  run "allow gate" python3 -B scripts/lint-ratchet/allow_gate.py --enforce
+  run "profile equality" python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
+  run "dash gate" python3 -B scripts/lint-ratchet/dash_gate.py --enforce
+}
+
 job_security() {
   section "Security Audit"
 
@@ -247,19 +260,20 @@ job_msrv() {
 
 JOBS=("$@")
 if [ ${#JOBS[@]} -eq 0 ]; then
-  JOBS=(lint nightly-lint security build-linux build-windows msrv)
+  JOBS=(lint nightly-lint lint-gates security build-linux build-windows msrv)
 fi
 
 for job in "${JOBS[@]}"; do
   case "$job" in
     lint) job_lint ;;
     nightly-lint) job_nightly_lint ;;
+    lint-gates) job_lint_gates ;;
     security) job_security ;;
     build-linux) job_build_linux ;;
     build-windows) job_build_windows ;;
     msrv) job_msrv ;;
     *)
-      printf 'unknown job: %s (want: lint nightly-lint security build-linux build-windows msrv)\n' "$job" >&2
+      printf 'unknown job: %s (want: lint nightly-lint lint-gates security build-linux build-windows msrv)\n' "$job" >&2
       exit 2
       ;;
   esac

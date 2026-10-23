@@ -262,6 +262,30 @@ jobs:
           RUSTDOCFLAGS: "-D warnings --cfg docsrs"
         run: cargo +${{ env.NIGHTLY_TOOLCHAIN }} doc --locked --no-deps --all-features
 
+  lint-gates:
+    name: Lint gates (lint-ratchet)
+    runs-on: ubuntu-latest
+    # Ported from rmcp-server-kit (scripts/lint-ratchet/); stdlib-only Python,
+    # 3.11 or newer for tomllib, no Rust toolchain. Each script names its local
+    # deltas in its header. The runner image's python3 is not pinned, so the first
+    # step asserts the floor the gates need.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Python is new enough for the gates (tomllib needs 3.11)
+        run: python3 -c 'import sys; assert sys.version_info >= (3, 11), sys.version'
+      - name: Gate self-tests
+        run: |
+          set -euo pipefail
+          for s in scripts/lint-ratchet/*.py; do python3 -B "$s" --self-test; done
+      - name: Vendored guideline is byte-for-byte (SHA256SUMS)
+        run: (cd docs/rust-guidelines && sha256sum -c SHA256SUMS)
+      - name: Allow gate (no allow attribute of any form)
+        run: python3 -B scripts/lint-ratchet/allow_gate.py --enforce
+      - name: Profile equality (Cargo.toml and clippy.toml against the vendored core)
+        run: python3 -B scripts/lint-ratchet/profile_eq.py --clippy-toml
+      - name: Dash gate
+        run: python3 -B scripts/lint-ratchet/dash_gate.py --enforce
+
   build-linux:
     name: Build & Test (Linux)
     runs-on: ubuntu-24.04
