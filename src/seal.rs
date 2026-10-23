@@ -885,7 +885,10 @@ pub(crate) mod tests {
     /// and keeps the parameters the file already carried: a rotation replaces the
     /// credential, not the KDF.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
+    #[expect(
+        clippy::panic,
+        reason = "deliberate: src/seal.rs::rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce a wrong-side test result must abort the test"
+    )]
     fn rotated_passphrase_slot_gets_a_fresh_salt_and_wrap_nonce() -> TestResult {
         let blob = seal(
             PLAINTEXT,

@@ -77,14 +77,20 @@ mod tests {
     }
 
     /// A well-formed principal for the fixtures.
-    #[expect(clippy::panic, reason = "fixture setup failures must abort the test")]
+    #[expect(
+        clippy::panic,
+        reason = "deliberate: tests/client_band.rs::principal fixture setup failures must abort the test"
+    )]
     fn principal() -> Principal {
         Principal::parse("admin@R.COM").unwrap_or_else(|error| panic!("fixture principal: {error}"))
     }
 
     /// A client for `identity`, pinned to an explicit configuration and a closed
     /// loopback port, so the case reads nothing ambient and cannot reach a KDC.
-    #[expect(clippy::panic, reason = "fixture setup failures must abort the test")]
+    #[expect(
+        clippy::panic,
+        reason = "deliberate: tests/client_band.rs::client_for fixture setup failures must abort the test"
+    )]
     fn client_for(identity: AdminIdentity, require_armor: bool) -> Client {
         Client::builder("R.COM", identity)
             .krb5_conf(b"[libdefaults]\n")
@@ -98,7 +104,7 @@ mod tests {
     /// default band, so only the band the unlocker carries can refuse it.
     #[expect(
         clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
+        reason = "deliberate: tests/client_band.rs::out_of_band_envelope an envelope operation failing means the format is broken"
     )]
     fn out_of_band_envelope() -> Vec<u8> {
         let params = Argon2idParams::new(OUT_OF_BAND_MEMORY_KIB, 1, 1)

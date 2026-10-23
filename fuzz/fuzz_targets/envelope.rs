@@ -17,7 +17,7 @@ fuzz_target!(|data: &[u8]| {
             clippy::let_underscore_must_use,
             clippy::let_underscore_untyped,
             let_underscore_drop,
-            reason = "the harness drives the call for panics and hangs; its value is not the property"
+            reason = "deliberate: fuzz/fuzz_targets/envelope.rs::fuzz_target the harness drives the call for panics and hangs; its value is not the property"
         )]
         let _ = envelope.slots();
         if let Ok(selection) = envelope.select_slot(
@@ -28,7 +28,7 @@ fuzz_target!(|data: &[u8]| {
             #[expect(
                 clippy::let_underscore_must_use,
                 clippy::let_underscore_untyped,
-                reason = "the harness drives the cost check for panics and hangs; its verdict is not the property"
+                reason = "deliberate: fuzz/fuzz_targets/envelope.rs::fuzz_target the harness drives the cost check for panics and hangs; its verdict is not the property"
             )]
             let _ = selection.check_cost_band();
         }

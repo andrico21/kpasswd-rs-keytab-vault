@@ -120,7 +120,7 @@ mod unlocker;
 #[expect(
     clippy::pub_use,
     clippy::useless_attribute,
-    reason = "SOW §4.6: the vault's surface is flat at the crate root and every implementation module is private, so this is the one place a re-export is the API rather than a convenience; clippy's `useless_attribute` reads any lint attribute on a `use` item as useless, and this is the only place `pub_use` can be scoped"
+    reason = "deliberate: src/lib.rs::crate SOW §4.6: the vault's surface is flat at the crate root and every implementation module is private, so this is the one place a re-export is the API rather than a convenience; clippy's `useless_attribute` reads any lint attribute on a `use` item as useless, and this is the only place `pub_use` can be scoped"
 )]
 pub use {
     credential::{
@@ -420,7 +420,7 @@ mod test_support {
         /// Opens `/proc/self/mem` and sizes the buffer for reads of `len` bytes.
         #[expect(
             clippy::panic,
-            reason = "a test that cannot read its own memory must fail, not pass"
+            reason = "deliberate: src/lib.rs::new a test that cannot read its own memory must fail, not pass"
         )]
         pub(crate) fn new(len: usize) -> Self {
             let file = File::open("/proc/self/mem")
@@ -434,7 +434,7 @@ mod test_support {
         /// How many of the bytes at `address` still hold `marker`.
         #[expect(
             clippy::panic,
-            reason = "a test that cannot read its own memory must fail, not pass"
+            reason = "deliberate: src/lib.rs::residue a test that cannot read its own memory must fail, not pass"
         )]
         pub(crate) fn residue(&mut self, address: usize, marker: u8) -> usize {
             let offset = u64::try_from(address)
@@ -511,11 +511,11 @@ mod test_support {
     impl KdfBackend for PanickingKdf {
         #[expect(
             clippy::panic,
-            reason = "reaching the backend on a path that must not derive is the failure under test"
+            reason = "deliberate: src/lib.rs::derive_argon2id reaching the backend on a path that must not derive is the failure under test"
         )]
         #[expect(
             clippy::panic_in_result_fn,
-            reason = "failing loudly is the assertion this backend exists to make"
+            reason = "deliberate: src/lib.rs::derive_argon2id failing loudly is the assertion this backend exists to make"
         )]
         fn derive_argon2id(
             &self,
@@ -530,7 +530,7 @@ mod test_support {
     /// Seal, parse, select with `credential`, and unlock.
     #[expect(
         clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
+        reason = "deliberate: src/lib.rs::roundtrip an envelope operation failing means the format is broken"
     )]
     pub(crate) fn roundtrip(
         recipients: &[Recipient<'_>],

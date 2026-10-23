@@ -561,7 +561,7 @@ mod tests {
     #[test]
     #[expect(
         clippy::match_same_arms,
-        reason = "SOW §4.6 lists RotationMismatch as its own row: it is unreachable on the unlock path and classified as Malformed deliberately, so it keeps its own arm to name that decision"
+        reason = "deliberate: src/unlocker.rs::every_envelope_error_maps_to_a_classification SOW §4.6 lists RotationMismatch as its own row: it is unreachable on the unlock path and classified as Malformed deliberately, so it keeps its own arm to name that decision"
     )]
     #[expect(
         clippy::unnecessary_wraps,
@@ -743,7 +743,7 @@ mod tests {
     /// formatter keeps the closing brace at column zero.
     #[expect(
         clippy::panic,
-        reason = "a missing declaration means the guard is about code that no longer exists"
+        reason = "deliberate: src/unlocker.rs::struct_declaration a missing declaration means the guard is about code that no longer exists"
     )]
     fn struct_declaration<'source>(source: &'source str, header: &str) -> &'source str {
         let start = source.find(header).map_or_else(

@@ -7,7 +7,7 @@
 //! the slot actually selected, which is why that check lives with the KDF.
 #![expect(
     clippy::field_scoped_visibility_modifiers,
-    reason = "the format's constants and its `Slot`/`Cursor` fields are crate-visible so the sibling modules can parse with them, and none of them is on the crate's flat surface."
+    reason = "deliberate: src/format.rs::format the format's constants and its `Slot`/`Cursor` fields are crate-visible so the sibling modules can parse with them, and none of them is on the crate's flat surface."
 )]
 use core::str::from_utf8;
 
@@ -791,7 +791,7 @@ mod tests {
     /// offset minus the prefix the slot keeps verbatim.
     #[expect(
         clippy::panic,
-        reason = "a slot that cannot be located means the fixture is broken"
+        reason = "deliberate: src/format.rs::slot_start a slot that cannot be located means the fixture is broken"
     )]
     fn slot_start(blob: &[u8], position: usize) -> usize {
         let parsed =
@@ -812,7 +812,7 @@ mod tests {
     /// produce these shapes, so the reader's own rules are what the tests pin.
     #[expect(
         clippy::panic,
-        reason = "a field that cannot be written means the fixture is broken"
+        reason = "deliberate: src/format.rs::overwrite_bytes a field that cannot be written means the fixture is broken"
     )]
     fn overwrite_bytes(blob: &mut [u8], start: usize, bytes: &[u8]) {
         blob.get_mut(start..start.saturating_add(bytes.len()))

@@ -7,7 +7,7 @@
 //! wrap.
 #![expect(
     clippy::field_scoped_visibility_modifiers,
-    reason = "the envelope's crate-visible helpers and the fields a rotation reads are shared with the sibling modules and are not on the crate's flat surface."
+    reason = "deliberate: src/envelope.rs::envelope the envelope's crate-visible helpers and the fields a rotation reads are shared with the sibling modules and are not on the crate's flat surface."
 )]
 
 use core::fmt;
@@ -346,7 +346,7 @@ impl Selection<'_> {
     /// The same failures [`Selection::unlock`] reports, plus the wrap's own.
     #[expect(
         clippy::type_complexity,
-        reason = "the pair *is* the unlock's result: the key a rotation rewraps and the plaintext it re-encrypts"
+        reason = "deliberate: src/envelope.rs::open the pair *is* the unlock's result: the key a rotation rewraps and the plaintext it re-encrypts"
     )]
     pub(crate) fn open(
         &self,

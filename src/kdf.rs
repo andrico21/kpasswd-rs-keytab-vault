@@ -255,7 +255,7 @@ pub trait KdfBackend {
 /// `#[non_exhaustive]` would be unconstructible instead.
 #[expect(
     clippy::exhaustive_structs,
-    reason = "zero fields: there is no future field to add, and a non-exhaustive unit struct cannot be constructed at all"
+    reason = "deliberate: src/kdf.rs::Argon2Kdf zero fields: there is no future field to add, and a non-exhaustive unit struct cannot be constructed at all"
 )]
 #[derive(Clone, Copy, Debug)]
 pub struct Argon2Kdf;
@@ -366,7 +366,7 @@ mod tests {
     /// The version field: magic is 14 bytes, then a little-endian `u16`.
     #[expect(
         clippy::panic,
-        reason = "a header shorter than the fixed magic is a broken fixture, which must abort the test"
+        reason = "deliberate: src/kdf.rs::version_of a header shorter than the fixed magic is a broken fixture, which must abort the test"
     )]
     fn version_of(blob: &[u8]) -> u16 {
         let Some(bytes) = blob.get(14..16) else {
@@ -384,7 +384,7 @@ mod tests {
     /// be compared on the parameters around it.
     #[expect(
         clippy::panic,
-        reason = "the fixture is a sealed envelope this module produced"
+        reason = "deliberate: src/kdf.rs::block_without_salt the fixture is a sealed envelope this module produced"
     )]
     fn block_without_salt(blob: &[u8]) -> [u8; KDF_BLOCK_LEN] {
         let envelope =
@@ -419,7 +419,7 @@ mod tests {
     /// caller's band can refuse the file.
     #[expect(
         clippy::panic,
-        reason = "the fixture is a sealed envelope this module produced"
+        reason = "deliberate: src/kdf.rs::sealed_declaring_memory the fixture is a sealed envelope this module produced"
     )]
     fn sealed_declaring_memory(memory_kib: u32) -> Vec<u8> {
         let mut blob = seal(
