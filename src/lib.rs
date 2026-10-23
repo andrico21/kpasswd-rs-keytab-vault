@@ -227,10 +227,14 @@ fn production_text(source: &str) -> String {
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod manifest_tests {
+    use crate::test_support::TestResult;
+
     /// The crate ships under the workspace's lints, and its feature set is the
     /// one the plan allows: none.
     ///
@@ -245,7 +249,11 @@ mod manifest_tests {
     /// header, or `[features]` buried in a longer table name must not be able to
     /// satisfy the first assertion or evade the second.
     #[test]
-    fn crate_is_a_member_with_the_workspace_lints() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/lib.rs::crate_is_a_member_with_the_workspace_lints keeps the uniform test signature while it only asserts"
+    )]
+    fn crate_is_a_member_with_the_workspace_lints() -> TestResult {
         let manifest = include_str!("../Cargo.toml");
         // The manifest has no `#` inside a string, so cutting each line at its
         // first `#` removes exactly the TOML comments.
@@ -283,6 +291,7 @@ mod manifest_tests {
             !features_table,
             "the vault crate has no features: it is the crypto"
         );
+        Ok(())
     }
 }
 
@@ -291,15 +300,23 @@ mod manifest_tests {
 /// than trusted.
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod production_text_tests {
+    use crate::test_support::TestResult;
+
     /// `production_text` keeps items before a `#[cfg(test)]` module, drops that
     /// module whole - including the bodies of modules nested inside it - and
     /// resumes at the next production item.
     #[test]
-    fn production_text_skips_exactly_the_test_modules() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/lib.rs::production_text_skips_exactly_the_test_modules keeps the uniform test signature while it only asserts"
+    )]
+    fn production_text_skips_exactly_the_test_modules() -> TestResult {
         let source = concat!(
             "fn kept() {}\n",
             "#[cfg(test)]\n",
@@ -328,12 +345,17 @@ mod production_text_tests {
             production.contains("fn also_kept()"),
             "and the scan resumes after the module closes"
         );
+        Ok(())
     }
 
     /// A `#[cfg(test)]` item that is not a module is a production item its own
     /// module uses, so it stays.
     #[test]
-    fn production_text_keeps_non_module_test_items() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/lib.rs::production_text_keeps_non_module_test_items keeps the uniform test signature while it only asserts"
+    )]
+    fn production_text_keeps_non_module_test_items() -> TestResult {
         let source = concat!(
             "fn kept() {}\n",
             "#[cfg(test)]\n",
@@ -345,6 +367,7 @@ mod production_text_tests {
             production.contains("fn helper()"),
             "a `#[cfg(test)]` fn is a production item and stays"
         );
+        Ok(())
     }
 }
 
@@ -355,6 +378,7 @@ mod production_text_tests {
     reason = "test code is not rendered API documentation"
 )]
 mod test_support {
+    use core::error::Error;
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     use std::fs::File;
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
@@ -369,6 +393,11 @@ mod test_support {
         kdf::{Argon2Kdf, Kdf, KdfBackend, KdfLimits},
         seal::seal,
     };
+
+    /// What every unit test returns: a failure is an `Err` the harness reports, so a
+    /// test propagates with `?` instead of panicking (core guideline: tests return
+    /// `Result`).
+    pub(crate) type TestResult = Result<(), Box<dyn Error>>;
 
     /// Reads what a freed heap block still holds, through this process's own
     /// `/proc/self/mem`: reading freed memory directly would take `unsafe`,

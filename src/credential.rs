@@ -202,10 +202,12 @@ fn decode_hex_key(text: &[u8]) -> Result<Zeroizing<[u8; KEK_LEN]>, EnvelopeError
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::too_long_first_doc_paragraph,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     use super::*;
     use crate::test_support::*;
@@ -217,7 +219,11 @@ mod tests {
     /// slot - and the signature is the negative half: the wrong length does not
     /// type-check, which is a stronger statement than a test can make.
     #[test]
-    fn slot_credential_raw_key_is_exact_length_by_type() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/credential.rs::slot_credential_raw_key_is_exact_length_by_type keeps the uniform test signature while it only asserts"
+    )]
+    fn slot_credential_raw_key_is_exact_length_by_type() -> TestResult {
         let credential = SlotCredential::RawKey(&RAW_KEY);
         assert_eq!(
             credential.kind(),
@@ -234,19 +240,19 @@ mod tests {
             rendered.contains(&KEK_LEN.to_string()),
             "the redacting rendering still names the type's length, got {rendered}"
         );
+        Ok(())
     }
 
     /// The raw-key rule's regression test: exactly 32 bytes are the key,
     /// even when the last byte is `0x0a`.
     #[test]
-    #[expect(clippy::panic, reason = "key parsing failing means the rule is broken")]
-    fn raw_key_32_bytes_ending_in_0x0a_accepted() {
+    fn raw_key_32_bytes_ending_in_0x0a_accepted() -> TestResult {
         let mut bytes = RAW_KEY;
         if let Some(last) = bytes.last_mut() {
             *last = 0x0a;
         }
         let parsed = raw_key_from_bytes(&bytes)
-            .unwrap_or_else(|error| panic!("a 32-byte key must be accepted: {error}"));
+            .map_err(|error| format!("a 32-byte key must be accepted: {error}"))?;
         assert_eq!(
             parsed.as_slice(),
             bytes.as_slice(),
@@ -255,7 +261,7 @@ mod tests {
         // The hex branch: 64 characters plus one trailing newline decode.
         let hex_text = b"00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n";
         let decoded = raw_key_from_bytes(hex_text)
-            .unwrap_or_else(|error| panic!("64 hex characters must decode: {error}"));
+            .map_err(|error| format!("64 hex characters must decode: {error}"))?;
         assert_eq!(
             decoded.as_slice(),
             &[
@@ -269,13 +275,18 @@ mod tests {
             raw_key_from_bytes(b"too short").is_err(),
             "a short input is not a raw key"
         );
+        Ok(())
     }
 
     /// The hex branch accepts exactly ASCII hex: `u8::from_str_radix` alone also
     /// takes a leading `+`, so the character class is checked first and the
     /// accepted set is literal.
     #[test]
-    fn hex_key_accepts_only_ascii_hex_characters() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/credential.rs::hex_key_accepts_only_ascii_hex_characters keeps the uniform test signature while it only asserts"
+    )]
+    fn hex_key_accepts_only_ascii_hex_characters() -> TestResult {
         let mut with_plus = [b'0'; HEX_KEY_LEN];
         with_plus[0] = b'+';
         with_plus[1] = b'a';
@@ -290,12 +301,17 @@ mod tests {
             raw_key_from_bytes(&both_spellings).is_ok(),
             "both hex spellings decode"
         );
+        Ok(())
     }
 
     /// A passphrase's length is caller information, so the redacting rendering
     /// does not name it; a raw key's length is its type, so that one does.
     #[test]
-    fn passphrase_debug_does_not_name_its_length() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/credential.rs::passphrase_debug_does_not_name_its_length keeps the uniform test signature while it only asserts"
+    )]
+    fn passphrase_debug_does_not_name_its_length() -> TestResult {
         let rendered = format!("{:?}", SlotCredential::Passphrase(PASSPHRASE));
         assert!(
             rendered.contains("<redacted>"),
@@ -311,5 +327,6 @@ mod tests {
             !rendered_owned.contains(&PASSPHRASE.len().to_string()),
             "the owned variant does not name the length either, got {rendered_owned}"
         );
+        Ok(())
     }
 }
