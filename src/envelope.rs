@@ -566,10 +566,12 @@ impl fmt::Debug for Selection<'_> {
 
 #[cfg(test)]
 #[expect(
+    clippy::missing_errors_doc,
     clippy::missing_panics_doc,
     clippy::too_long_first_doc_paragraph,
     reason = "test code is not rendered API documentation"
 )]
+#[expect(clippy::panic_in_result_fn, reason = "a test fails by panicking")]
 mod tests {
     use super::*;
     use crate::{
@@ -589,15 +591,11 @@ mod tests {
     /// `cipher_from_key` holds no copy of the key: the caller's array goes into
     /// the cipher by reference, so nothing is left behind for a wipe to miss.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "a missing function means the guard is about code that no longer exists"
-    )]
-    fn cipher_from_key_binds_no_copy_of_the_key() {
+    fn cipher_from_key_binds_no_copy_of_the_key() -> TestResult {
         let source = production_text(include_str!("envelope.rs"));
         let start = source
             .find("pub(crate) fn cipher_from_key(")
-            .unwrap_or_else(|| panic!("`cipher_from_key` must still exist"));
+            .ok_or("`cipher_from_key` must still exist")?;
         let body = source.get(start..).unwrap_or_default();
         let end = body.find("\n}").unwrap_or(body.len());
         let window = body.get(..end).unwrap_or_default();
@@ -607,6 +605,7 @@ mod tests {
                 "`cipher_from_key` must not hold its own copy of the key (found `{copy}`)"
             );
         }
+        Ok(())
     }
 
     /// The cipher's own copy of the key is wiped when the cipher is dropped.
@@ -617,7 +616,11 @@ mod tests {
     /// and the block is read back through `/proc/self/mem` after it is freed.
     #[cfg(all(target_os = "linux", target_env = "gnu"))]
     #[test]
-    fn a_dropped_cipher_wipes_its_key() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/envelope.rs::a_dropped_cipher_wipes_its_key keeps the uniform test signature while it only asserts"
+    )]
+    fn a_dropped_cipher_wipes_its_key() -> TestResult {
         use core::ptr;
 
         /// A cipher at a fixed offset from the start of its heap block.
@@ -660,49 +663,57 @@ mod tests {
             control, KEK_LEN,
             "the instrument must see an unwiped freed block; it saw {control} of {KEK_LEN} bytes"
         );
+        Ok(())
     }
 
     /// The raw-key path round-trips.
     #[test]
-    fn roundtrip_raw_key_slot() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/envelope.rs::roundtrip_raw_key_slot keeps the uniform test signature while it only asserts"
+    )]
+    fn roundtrip_raw_key_slot() -> TestResult {
         let credential = SlotCredential::RawKey(&RAW_KEY);
         assert_eq!(
             roundtrip(&[raw_recipient(7, "operator")], &credential),
             PLAINTEXT
         );
+        Ok(())
     }
 
     /// The passphrase path round-trips through Argon2id at the format's
     /// parameters.
     #[test]
-    fn roundtrip_passphrase_slot() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/envelope.rs::roundtrip_passphrase_slot keeps the uniform test signature while it only asserts"
+    )]
+    fn roundtrip_passphrase_slot() -> TestResult {
         let credential = SlotCredential::Passphrase(PASSPHRASE);
         assert_eq!(
             roundtrip(&[passphrase_recipient(1, "operator")], &credential),
             PLAINTEXT
         );
+        Ok(())
     }
 
     /// A key that is not the sealing key is rejected, not silently accepted.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn wrong_key_rejected() {
+    fn wrong_key_rejected() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&OTHER_KEY);
         let selected = envelope
             .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         let outcome = selected.unlock(&credential, &Argon2Kdf);
         assert!(
             matches!(outcome, Err(EnvelopeError::AuthenticationFailed)),
             "a wrong key must fail the wrap tag"
         );
+        Ok(())
     }
 
     /// A passphrase that is not the sealing one must fail authentication.
@@ -711,23 +722,19 @@ mod tests {
     /// round-trip test: sealing and unlocking would agree on the same wrong
     /// key. This is the test that makes the derivation load-bearing.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn wrong_passphrase_rejected() {
+    fn wrong_passphrase_rejected() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[passphrase_recipient(1, "operator")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::Passphrase(b"not the sealing passphrase");
         let selected = envelope
             .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         assert!(
             matches!(
                 selected.unlock(&credential, &Argon2Kdf),
@@ -735,28 +742,25 @@ mod tests {
             ),
             "a wrong passphrase must fail the wrap tag"
         );
+        Ok(())
     }
 
     /// A single flipped payload bit is caught by the tag.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn bitflip_rejected_by_tag() {
+    fn bitflip_rejected_by_tag() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(7, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let mut corrupted = blob;
         let last = corrupted.len().saturating_sub(1);
         if let Some(byte) = corrupted.get_mut(last) {
             *byte ^= 0x01;
         }
-        let envelope = KeytabEnvelope::parse(&corrupted)
-            .unwrap_or_else(|error| panic!("parse failed: {error}"));
+        let envelope =
+            KeytabEnvelope::parse(&corrupted).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         let selected = envelope
             .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         assert!(
             matches!(
                 selected.unlock(&credential, &Argon2Kdf),
@@ -764,53 +768,47 @@ mod tests {
             ),
             "a flipped ciphertext bit must fail the payload tag"
         );
+        Ok(())
     }
 
     /// A swapped slot cannot authenticate: the wrap AAD binds each slot's
     /// own identity, so slot bytes moved between files fail the tag.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn slot_swap_rejected_by_aad() {
+    fn slot_swap_rejected_by_aad() -> TestResult {
         let first = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let second = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         // Replace the pod slot's wrapped DEK with the other file's: same id, same
         // label, different wrap nonce and wrapped key. The range is read off the
         // parsed file rather than hardcoded, so a header change cannot silently
         // make this test stop corrupting anything.
         let parsed =
-            KeytabEnvelope::parse(&first).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        let pod = parsed
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
+            KeytabEnvelope::parse(&first).map_err(|error| format!("parse failed: {error}"))?;
+        let pod = parsed.slots.get(1).ok_or("the pod slot exists")?;
         let start = pod
             .dek_offset
             .checked_sub(pod.wrap_prefix.len())
-            .unwrap_or_else(|| panic!("the prefix precedes the wrap"));
+            .ok_or("the prefix precedes the wrap")?;
         let end = start
             .checked_add(pod.wrap_prefix.len())
             .and_then(|sum| sum.checked_add(WRAPPED_DEK_LEN))
-            .unwrap_or_else(|| panic!("the slot fits in the file"));
+            .ok_or("the slot fits in the file")?;
         let source = second.get(start..end).unwrap_or_default().to_vec();
         let mut swapped = first.clone();
         if let Some(target) = swapped.get_mut(start..end) {
             target.copy_from_slice(&source);
         }
         let envelope =
-            KeytabEnvelope::parse(&swapped).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&swapped).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         let selected = envelope
             .select_slot(
@@ -818,7 +816,7 @@ mod tests {
                 &KdfLimits::defaults(),
                 &credential,
             )
-            .unwrap_or_else(|error| panic!("select failed: {error}"));
+            .map_err(|error| format!("select failed: {error}"))?;
         assert!(
             matches!(
                 selected.unlock(&credential, &Argon2Kdf),
@@ -826,47 +824,44 @@ mod tests {
             ),
             "a slot's bytes moved between files must fail the wrap tag"
         );
+        Ok(())
     }
 
     /// A structurally matching slot taken from another file does not
     /// authenticate: the wrap transcript carries this file's `file_id`, so bytes
     /// that came from elsewhere cannot be pasted in (KRP-93).
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn slot_spliced_from_another_file_fails_authentication() {
+    fn slot_spliced_from_another_file_fails_authentication() -> TestResult {
         let first = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let second = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let parsed =
-            KeytabEnvelope::parse(&first).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        let pod = parsed
-            .slots
-            .get(1)
-            .unwrap_or_else(|| panic!("the pod slot exists"));
+            KeytabEnvelope::parse(&first).map_err(|error| format!("parse failed: {error}"))?;
+        let pod = parsed.slots.get(1).ok_or("the pod slot exists")?;
         let start = pod
             .dek_offset
             .checked_sub(pod.wrap_prefix.len())
-            .unwrap_or_else(|| panic!("the prefix precedes the wrap"));
+            .ok_or("the prefix precedes the wrap")?;
         let end = pod
             .dek_offset
             .checked_add(WRAPPED_DEK_LEN)
-            .unwrap_or_else(|| panic!("the wrap fits"));
+            .ok_or("the wrap fits")?;
         let donor = second.get(start..end).unwrap_or_default().to_vec();
         let mut spliced = first.clone();
         if let Some(target) = spliced.get_mut(start..end) {
             target.copy_from_slice(&donor);
         }
         let envelope =
-            KeytabEnvelope::parse(&spliced).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&spliced).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         assert!(
             matches!(
@@ -876,12 +871,13 @@ mod tests {
                         &KdfLimits::defaults(),
                         &credential
                     )
-                    .unwrap_or_else(|error| panic!("select failed: {error}"))
+                    .map_err(|error| format!("select failed: {error}"))?
                     .unlock(&credential, &Argon2Kdf),
                 Err(EnvelopeError::AuthenticationFailed)
             ),
             "a slot's bytes taken from another file must fail the wrap tag"
         );
+        Ok(())
     }
 
     /// The old slot and the old payload under the new header do not authenticate:
@@ -890,10 +886,10 @@ mod tests {
     /// This is the guarantee a rotation makes - "no slot can be restored from an
     /// old copy, and only the whole old file still opens" - stated as a test.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn old_slot_with_old_payload_ciphertext_and_tag_under_new_header_fails_authentication() {
+    fn old_slot_with_old_payload_ciphertext_and_tag_under_new_header_fails_authentication()
+    -> TestResult {
         let original = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let old = SlotCredential::RawKey(&RAW_KEY);
         let rotated = rewrap_slot(
             &original,
@@ -901,19 +897,16 @@ mod tests {
             SlotSelector::Index(0),
             &raw_recipient_with(1, "operator", &OTHER_KEY),
         )
-        .unwrap_or_else(|error| panic!("rewrap failed: {error}"));
-        let before = KeytabEnvelope::parse(&original)
-            .unwrap_or_else(|error| panic!("parse failed: {error}"));
+        .map_err(|error| format!("rewrap failed: {error}"))?;
+        let before =
+            KeytabEnvelope::parse(&original).map_err(|error| format!("parse failed: {error}"))?;
         let after =
-            KeytabEnvelope::parse(&rotated).unwrap_or_else(|error| panic!("parse failed: {error}"));
-        let target = before
-            .slots
-            .first()
-            .unwrap_or_else(|| panic!("the slot exists"));
+            KeytabEnvelope::parse(&rotated).map_err(|error| format!("parse failed: {error}"))?;
+        let target = before.slots.first().ok_or("the slot exists")?;
         let start = target
             .dek_offset
             .checked_sub(target.wrap_prefix.len())
-            .unwrap_or_else(|| panic!("the prefix precedes the wrap"));
+            .ok_or("the prefix precedes the wrap")?;
         let header_len = before.header.len();
         let old_prefix = target.wrap_prefix.clone();
         let old_dek = target.wrapped_dek;
@@ -931,11 +924,11 @@ mod tests {
             field.copy_from_slice(&old_ciphertext);
         }
         let envelope =
-            KeytabEnvelope::parse(&mixed).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&mixed).map_err(|error| format!("parse failed: {error}"))?;
         assert!(
             before
                 .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &old)
-                .unwrap_or_else(|error| panic!("select failed: {error}"))
+                .map_err(|error| format!("select failed: {error}"))?
                 .unlock(&old, &Argon2Kdf)
                 .is_ok(),
             "the whole old file still opens with the old credential"
@@ -944,7 +937,7 @@ mod tests {
             matches!(
                 envelope
                     .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &old)
-                    .unwrap_or_else(|error| panic!("select failed: {error}"))
+                    .map_err(|error| format!("select failed: {error}"))?
                     .unlock(&old, &Argon2Kdf),
                 Err(EnvelopeError::AuthenticationFailed)
             ),
@@ -955,7 +948,7 @@ mod tests {
             matches!(
                 after
                     .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &old)
-                    .unwrap_or_else(|error| panic!("select failed: {error}"))
+                    .map_err(|error| format!("select failed: {error}"))?
                     .unlock(&old, &Argon2Kdf),
                 Err(EnvelopeError::AuthenticationFailed)
             ),
@@ -964,21 +957,21 @@ mod tests {
         assert!(
             after
                 .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &new)
-                .unwrap_or_else(|error| panic!("select failed: {error}"))
+                .map_err(|error| format!("select failed: {error}"))?
                 .unlock(&new, &Argon2Kdf)
                 .is_ok(),
             "while the replacement does"
         );
+        Ok(())
     }
 
     /// The version sits in both AAD transcripts, so relabelling a file is either
     /// refused on the version (an unsupported value) or fails authentication (a
     /// supported value written back over a header that also moved).
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn version_relabel_fails_authentication_or_version_check() {
+    fn version_relabel_fails_authentication_or_version_check() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         // An unsupported label is refused on the version, before anything else.
         let mut relabelled = blob.clone();
         if let Some(field) = relabelled.get_mut(14..16) {
@@ -1014,29 +1007,26 @@ mod tests {
             field.copy_from_slice(&[1, 0]);
         }
         let envelope = KeytabEnvelope::parse(&tampered)
-            .unwrap_or_else(|error| panic!("the relabelled file parses: {error}"));
+            .map_err(|error| format!("the relabelled file parses: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         assert!(
             matches!(
                 envelope
                     .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-                    .unwrap_or_else(|error| panic!("select failed: {error}"))
+                    .map_err(|error| format!("select failed: {error}"))?
                     .unlock(&credential, &Argon2Kdf),
                 Err(EnvelopeError::AuthenticationFailed)
             ),
             "writing the version back does not repair a header that moved: the tag says so"
         );
+        Ok(())
     }
 
     /// The byte-exact file for one fixed raw-key seal. "Canonical" is only
     /// meaningful if the serialization is pinned, so this test notices a
     /// field moving, a width changing, or an AAD transcript drifting.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn golden_raw_key_vector_matches() {
+    fn golden_raw_key_vector_matches() -> TestResult {
         let material = deterministic_material(1);
         let blob = seal_with(
             PLAINTEXT,
@@ -1044,22 +1034,19 @@ mod tests {
             &material,
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let rendered = hex(&blob);
         assert_eq!(
             rendered, GOLDEN_RAW_KEY_FILE,
             "the raw-key serialization must match the pinned bytes"
         );
+        Ok(())
     }
 
     /// The byte-exact file for one fixed passphrase seal, for the same reason as
     /// the raw-key vector.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn golden_passphrase_vector_matches() {
+    fn golden_passphrase_vector_matches() -> TestResult {
         let material = deterministic_material(2);
         let blob = seal_with(
             PLAINTEXT,
@@ -1067,12 +1054,13 @@ mod tests {
             &material,
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         assert_eq!(
             hex(&blob),
             GOLDEN_PASSPHRASE_FILE,
             "the passphrase serialization must match the pinned bytes"
         );
+        Ok(())
     }
 
     /// D1: the DEK that `Aead::decrypt` returns is bound **inside** the
@@ -1085,15 +1073,14 @@ mod tests {
     /// shapes produce the same bytes. The guard reads the source instead:
     /// whitespace is stripped first, since `rustfmt` wraps the call.
     #[test]
-    #[expect(clippy::panic, reason = "the guard must find the function it pins")]
-    fn unwrapped_dek_is_zeroizing_from_decrypt() {
+    fn unwrapped_dek_is_zeroizing_from_decrypt() -> TestResult {
         let source = include_str!("envelope.rs");
         let production = production_text(source);
         // At column zero, so `Selection::unwrap_dek` - the same name one layer
         // up - cannot be the function this guard reads.
         let start = production
             .find("\nfn unwrap_dek(")
-            .unwrap_or_else(|| panic!("unwrap_dek must still exist"));
+            .ok_or("unwrap_dek must still exist")?;
         let function = production.get(start..).unwrap_or_default();
         let end = function.find("\n}").unwrap_or(function.len());
         let unwrap_dek_text = function.get(..end).unwrap_or_default();
@@ -1110,6 +1097,7 @@ mod tests {
             squashed.contains("dek.as_slice()"),
             "and the copy must come out of the `Zeroizing` binding: {squashed}"
         );
+        Ok(())
     }
 
     /// Every owned data key in this module is a `Zeroizing`, asserted on the
@@ -1124,7 +1112,11 @@ mod tests {
     /// The positive half is checked too, so the guard cannot pass by matching
     /// nothing at all.
     #[test]
-    fn owned_envelope_secrets_are_zeroizing() {
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "deliberate: src/envelope.rs::owned_envelope_secrets_are_zeroizing keeps the uniform test signature while it only asserts"
+    )]
+    fn owned_envelope_secrets_are_zeroizing() -> TestResult {
         let source = concat!(include_str!("seal.rs"), "\n", include_str!("envelope.rs"));
         let production = production_text(source);
         for (what, shape) in [
@@ -1153,17 +1145,14 @@ mod tests {
                 "the guard must still find `{shape}`: it pins the shape that keeps the key wiped"
             );
         }
+        Ok(())
     }
 
     /// A token selects the slot it *names*, not merely some slot: the two
     /// slots are sealed with different keys, so selecting the wrong one
     /// cannot unlock.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn a_token_selects_the_slot_it_names() {
+    fn a_token_selects_the_slot_it_names() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[
@@ -1172,42 +1161,39 @@ mod tests {
             ],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let pod_key = SlotCredential::RawKey(&OTHER_KEY);
         let by_id = envelope
             .select_slot(SlotSelector::Index(1), &KdfLimits::defaults(), &pod_key)
-            .unwrap_or_else(|error| panic!("the position must select: {error}"));
+            .map_err(|error| format!("the position must select: {error}"))?;
         assert!(
             by_id.unlock(&pod_key, &Argon2Kdf).is_ok(),
             "selecting the second slot must pick the slot sealed with that key"
         );
         let by_label = envelope
             .select_slot(SlotSelector::Label("pod"), &KdfLimits::defaults(), &pod_key)
-            .unwrap_or_else(|error| panic!("the label must select: {error}"));
+            .map_err(|error| format!("the label must select: {error}"))?;
         assert!(
             by_label.unlock(&pod_key, &Argon2Kdf).is_ok(),
             "selecting by label must pick the same slot"
         );
+        Ok(())
     }
 
     /// A selector is never ambiguous: an index or a label names one slot or
     /// none, and naming none is refused at selection, before any derivation.
     #[test]
-    #[expect(
-        clippy::panic,
-        reason = "an envelope operation failing means the format is broken"
-    )]
-    fn a_selector_names_one_slot_or_is_refused() {
+    fn a_selector_names_one_slot_or_is_refused() -> TestResult {
         let blob = seal(
             PLAINTEXT,
             &[raw_recipient(1, "operator"), raw_recipient(2, "pod")],
             &Kdf::default(),
         )
-        .unwrap_or_else(|error| panic!("seal failed: {error}"));
+        .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         // An index is a position in the file and a label is unique, so neither
         // can match two slots. Which slot to use when the caller named none is
@@ -1239,22 +1225,23 @@ mod tests {
             ),
             "a label that names nothing is refused"
         );
+        Ok(())
     }
 
     /// KRP-78: unlock from bytes, with no path anywhere in the call.
     #[test]
-    #[expect(clippy::panic, reason = "a wrong-side test result must abort the test")]
-    fn unlocks_from_bytes_without_a_path() {
+    fn unlocks_from_bytes_without_a_path() -> TestResult {
         let blob = seal(PLAINTEXT, &[raw_recipient(1, "operator")], &Kdf::default())
-            .unwrap_or_else(|error| panic!("seal failed: {error}"));
+            .map_err(|error| format!("seal failed: {error}"))?;
         let envelope =
-            KeytabEnvelope::parse(&blob).unwrap_or_else(|error| panic!("parse failed: {error}"));
+            KeytabEnvelope::parse(&blob).map_err(|error| format!("parse failed: {error}"))?;
         let credential = SlotCredential::RawKey(&RAW_KEY);
         let plaintext = envelope
             .select_slot(SlotSelector::Index(0), &KdfLimits::defaults(), &credential)
-            .unwrap_or_else(|error| panic!("select failed: {error}"))
+            .map_err(|error| format!("select failed: {error}"))?
             .unlock(&credential, &PanickingKdf)
-            .unwrap_or_else(|error| panic!("unlock from bytes failed: {error}"));
+            .map_err(|error| format!("unlock from bytes failed: {error}"))?;
         assert_eq!(plaintext.as_slice(), PLAINTEXT);
+        Ok(())
     }
 }
