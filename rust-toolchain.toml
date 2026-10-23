@@ -1,8 +1,9 @@
-# The one toolchain for every gate, local and CI. rustup applies it to every
-# cargo call in the checkout, ahead of the workflows' `toolchain:` inputs, so
-# those inputs must name this channel (scripts/check-drift.sh). The MSRV job
-# overrides it with RUSTUP_TOOLCHAIN. The Windows target serves
-# scripts/ci-local.sh's cross-target check and clippy legs.
+# The one toolchain for every stable gate, local and CI. rustup applies it to
+# every cargo call in the checkout, ahead of the workflows' `toolchain:` inputs,
+# so those inputs must name this channel (scripts/check-drift.sh). The MSRV job
+# overrides it with RUSTUP_TOOLCHAIN; the fuzz and nightly-lint jobs name a
+# dated nightly with `cargo +<pin>` (check-drift.sh requires it dated). The
+# Windows target serves scripts/ci-local.sh's cross-target check and clippy legs.
 [toolchain]
 channel = "1.99.1"
 profile = "minimal"

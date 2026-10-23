@@ -7,12 +7,16 @@
 #      `toolchain:` input (dtolnay/rust-toolchain only sets rustup's
 #      default), so an input naming another channel is a pin that does
 #      nothing. Allowed: the file's channel, or an `env.*` expression - the
-#      fuzz job's dated nightly and the MSRV job's RUSTUP_TOOLCHAIN, which
-#      must equal Cargo.toml's rust-version (1.99 -> 1.99.0).
+#      dated-nightly jobs' `*_TOOLCHAIN` pins (fuzz, nightly-lint) and the
+#      MSRV job's RUSTUP_TOOLCHAIN, which must equal Cargo.toml's
+#      rust-version (1.99 -> 1.99.0).
 #   2. The fuzz harness's lint profile. fuzz/ is its own workspace
 #      (cargo-fuzz), so it cannot inherit the root's [workspace.lints]; it
 #      carries a verbatim copy, from the first [workspace.lints.*] header to
 #      the end of the file.
+#   3. Dated nightlies. Every `*_TOOLCHAIN:` value except `RUSTUP_TOOLCHAIN`
+#      must be `nightly-YYYY-MM-DD`: an env-indirected toolchain input passes
+#      check 1 unread, so this is what keeps it pinned.
 set -euo pipefail
 cd "$(dirname "$0")/.." || exit 1
 
@@ -70,7 +74,32 @@ if ! grep -A1 -x '\[lints\]' fuzz/Cargo.toml | grep -qx 'workspace = true'; then
   status=1
 fi
 
+pin_lines=$({ grep -rnE '^[[:space:]]*[A-Z_]+_TOOLCHAIN:' .github/workflows/ \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*RUSTUP_TOOLCHAIN:' || true; })
+pin_values=$(printf '%s\n' "$pin_lines" | awk 'NF {
+      v = $0
+      sub(/^[^:]+:[0-9]+:[[:space:]]*[A-Z_]+_TOOLCHAIN:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      gsub(/"/, "", v)
+      print v
+    }')
+bad_pins=$(printf '%s\n' "$pin_lines" | awk 'NF {
+      v = $0
+      sub(/^[^:]+:[0-9]+:[[:space:]]*[A-Z_]+_TOOLCHAIN:[[:space:]]*/, "", v)
+      sub(/[[:space:]]+#.*$/, "", v)
+      gsub(/"/, "", v)
+      if (v !~ /^nightly-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) print
+    }')
+if [ -z "$pin_lines" ]; then
+  echo "no *_TOOLCHAIN pins in .github/workflows/: the dated nightlies are missing"
+  status=1
+elif [ -n "$bad_pins" ]; then
+  printf 'workflow *_TOOLCHAIN pins that are not a dated nightly:\n%s\n' "$bad_pins"
+  status=1
+fi
+
 if [ "$status" -eq 0 ]; then
-  echo "drift check passed: toolchain pins $channel, MSRV job $msrv, fuzz lint table = root"
+  nightlies=$(printf '%s\n' "$pin_values" | paste -sd, - | sed 's/,/, /g')
+  echo "drift check passed: toolchain pins $channel, MSRV job $msrv, dated nightlies $nightlies, fuzz lint table = root"
 fi
 exit "$status"
